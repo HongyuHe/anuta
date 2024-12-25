@@ -147,7 +147,8 @@ class Cidds001(Constructor):
                     #& Prioritize rare values (inductive bias).
                     #& Using the frequency only as a tie-breaker [count, freq].
                     freq = len(indexset[cat][val])
-                    dc = DomainCounter(count=0, frequency=freq)
+                    # dc = DomainCounter(count=0, frequency=freq)
+                    dc = DomainCounter(count=0, frequency=0)
                     fcount[cat] |= {val: dc} if type(val) == int else {val.item(): dc}
                 
         return indexset, fcount
