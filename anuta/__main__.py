@@ -13,7 +13,7 @@ from time import perf_counter
 
 from grammar import AnutaMilli
 from constructor import Constructor, Millisampler, Cidds001
-from miner import miner
+from miner import miner, miner_waterfall
 from utils import log, save_constraints
 import json
 
@@ -22,7 +22,7 @@ anuta : AnutaMilli = None
 
     
 def main(constructor: Constructor, limit: int):
-    miner(constructor, limit)
+    miner_waterfall(constructor, limit)
     
 
 if __name__ == '__main__':

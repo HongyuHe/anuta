@@ -209,3 +209,75 @@ def miner(constructor: Constructor, limit: int = 0):
     
     anuta.learned_kb = reduced_kb + anuta.prior_kb
     Model.save_constraints(anuta.learned_kb, f'reduced_{label}')
+    
+def miner_waterfall(constructor: Constructor, limit: int = 0):
+    global anuta
+    label = str(limit)
+    anuta = constructor.anuta
+    start = perf_counter()
+    
+    #* Prepare arguments for parallel processing
+    core_count = psutil.cpu_count()
+    log.info(f"Spawning {core_count} workers ...")
+    # mutex = Manager().Lock()
+    dfpartitions = [df.reset_index(drop=True) for df in np.array_split(constructor.df, core_count)]
+    indexsets, fcounts = zip(*[constructor.get_indexset_and_counter(df) for df in dfpartitions])
+    args = [(i, df, indexset, fcount, limit//core_count) 
+            for i, (df, indexset, fcount) in enumerate(zip(dfpartitions, indexsets, fcounts))]
+    pprint(fcounts[0])
+    
+    print(f"Testing constraints in parallel ...")
+    pool = Pool(core_count)
+    # violation_indices, bounds_array = pool.starmap(test_constraints, args)
+    # violation_indices = pool.starmap(test_millisampler_constraints, args)
+    violation_indices = pool.starmap(test_cidds_constraints, args)
+    # violation_indices = [r[0] for r in results]
+    # bounds_array = [r[1] for r in results]
+    # pool.close()
+
+    log.info(f"All workers finished.")
+    
+    aggregated_violations = np.logical_or.reduce(violation_indices)
+    # aggregated_bounds = {k: IntBounds(sys.maxsize, 0) for k in anuta.bounds.keys()}
+    learned_kb = []
+    log.info(f"Aggregating violations ...")
+    #* Update learned_kb based on the violated constraints
+    for index, is_violated in tqdm(enumerate(aggregated_violations), total=len(aggregated_violations)):
+        if not is_violated:
+            learned_kb.append(anuta.initial_kb[index])
+    
+    end = perf_counter()
+    # log.info(f"Aggregating bounds ...")
+    #* Update the bounds based on the learned bounds
+    # for bounds in bounds_array:
+    #     for k, v in bounds.items():
+    #         if v.lb < aggregated_bounds[k].lb:
+    #             aggregated_bounds[k].lb = v.lb
+    #         if v.ub > aggregated_bounds[k].ub:
+    #             aggregated_bounds[k].ub = v.ub
+
+    removed_count = len(anuta.initial_kb) - len(learned_kb)
+    # pprint(aggregated_bounds)
+    print(f"{len(learned_kb)=}, {len(anuta.initial_kb)=} ({removed_count=})")
+    Model.save_constraints(learned_kb + anuta.prior_kb, f'learned_{label}.rule')
+    print(f"Learning time: {end-start:.2f}s\n\n")
+    
+    if len(learned_kb) > 200: 
+        #* Skip pruning if the number of constraints is too large
+        return
+    
+    start = perf_counter()
+    log.info(f"Pruning redundant constraints ...")
+    # assumptions = [v >= 0 for v in anuta.variables.values()]
+    assumptions = []
+    cnf = sp.And(*(learned_kb + assumptions))
+    simplified_logic = cnf.simplify()
+    reduced_kb = list(simplified_logic.args) \
+        if isinstance(simplified_logic, sp.And) else [simplified_logic]
+    filtered_count = len(learned_kb) - len(reduced_kb)
+    end = perf_counter()
+    print(f"{len(learned_kb)=}, {len(reduced_kb)=} ({filtered_count=})\n")
+    print(f"Pruning time: {end-start:.2f}s\n\n")
+    
+    anuta.learned_kb = reduced_kb + anuta.prior_kb
+    Model.save_constraints(anuta.learned_kb, f'reduced_{label}.rule')
