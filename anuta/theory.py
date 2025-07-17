@@ -18,7 +18,8 @@ from anuta.known import *
 class ProofResult(Enum):
     ENTAILMENT = "Entailed"
     CONTRADICATION = "Contradiction"
-    UNKNOWN = "Contingency/Unknown"
+    CONTINGENCY = "Contingency"
+    UNRESOLVED = "Undetermined"
 
 class Constraint(object):
     #^ Can't inherit from sympy.Expr as it causes AttributeError on newly defined attributes.
@@ -117,7 +118,7 @@ class Theory(object):
         #     else:
         #         queries.append(q)
         # entailed = not satisfiable(sp.And(self._theory, *queries))
-        result = ProofResult.ENTAILMENT if entailed else ProofResult.UNKNOWN
+        result = ProofResult.ENTAILMENT if entailed else ProofResult.CONTINGENCY
         
         #* Need to check if the query is a contradiction.
         if not entailed:
@@ -145,7 +146,7 @@ class Theory(object):
                     pprint("Counterexample found:")
                     pprint(sat)
             else:
-                result = ProofResult.UNKNOWN
+                result = ProofResult.CONTINGENCY
         
         end = perf_counter()
         
@@ -169,15 +170,29 @@ class Theory(object):
         if r == z3.unsat:
             #* If the negation of the query is unsatisfiable, then the query is entailed.
             result = ProofResult.ENTAILMENT
-        elif r == z3.unknown:
-            #* If the solver cannot determine the satisfiability, we consider it unknown/contingency.
-            result = ProofResult.UNKNOWN
-        elif r == z3.sat:
-            #* If the negation of the query is satisfiable, then the query is a contradiction.
-            result = ProofResult.CONTRADICATION
-            if verbose:
-                pprint("Counterexample found:")
-                pprint(s.model())
+        else: 
+            #! We need a second call to check if the query is a contradiction.
+            s.reset()
+            s.add(z3.And(
+                self._z3theory,
+                query
+            ))
+            r = s.check()
+            if r == z3.unsat:
+                #* If the query is unsatisfiable, then it is a contradiction.
+                result = ProofResult.CONTRADICATION
+                # if verbose:
+                #     pprint("Counterexample found:")
+                #     pprint(s.model())
+            elif r == z3.sat:
+                #* If the negation of the query is satisfiable, 
+                #*  then the query is a contradiction/contingency, containing 
+                #*  non-trivial info previously unknown.
+                result = ProofResult.CONTINGENCY
+            else:
+                assert r == z3.unknown, f"Unexpected result from Z3: {r}"
+                #* Z3 doesn't have enough time/resources to determine the satisfiability.
+                result = ProofResult.UNRESOLVED
         
         # query = sp.sympify(query)
         # if type(query) == sp.Equivalent:
