@@ -499,7 +499,7 @@ class Theory(object):
 
         expressions_str = sorted([str(expr) for expr in constraints])
         with open(f"{path}.json", 'w') as f:
-            json.dump(expressions_str, f, indent=4, sort_keys=True)
+            json.dump(expressions_str, f, indent=0, sort_keys=True)
         log.info(f"Constraints saved to {path}/json")
 
     @staticmethod
