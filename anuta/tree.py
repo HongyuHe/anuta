@@ -371,6 +371,7 @@ class EntropyTreeLearner(TreeLearner):
                 cond_left = f"{varname}_≤_{node.threshold}"
                 cond_right = f"{varname}_>_{node.threshold}"
 
+            #* Resulting path IDs: 0-LRRL
             recurse(node.left_child, path + [cond_left], path_suffix + "L", tree_index)
             recurse(node.right_child, path + [cond_right], path_suffix + "R", tree_index)
 
@@ -926,11 +927,11 @@ class LightGbmTreeLearner(TreeLearner):
                             values = var_conditions[varname].get(op, set())
                             var_conditions[varname][op] = values | set(varval)
                         elif op == '>':
-                            value = var_conditions[varname].get(op, float('+inf'))
-                            var_conditions[varname][op] = min(value, varval)
-                        elif op == '≤':
                             value = var_conditions[varname].get(op, float('-inf'))
                             var_conditions[varname][op] = max(value, varval)
+                        elif op == '≤':
+                            value = var_conditions[varname].get(op, float('+inf'))
+                            var_conditions[varname][op] = min(value, varval)
 
                     predicates = []
                     for varname, merged_conditions in var_conditions.items():
