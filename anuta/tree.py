@@ -223,13 +223,13 @@ class EntropyTreeLearner(TreeLearner):
                             elif op == '>':  
                                 if self.dtypes[varname] == 'int':
                                     varval = math.floor(varval)
-                                value = merged_conditions[varname].get(op, float('+inf'))
-                                merged_conditions[varname][op] = min(value, varval)
+                                value = merged_conditions[varname].get(op, float('-inf'))
+                                merged_conditions[varname][op] = max(value, varval)
                             elif op == '≤':
                                 if self.dtypes[varname] == 'int':
                                     varval = math.ceil(varval)
-                                value = merged_conditions[varname].get(op, float('-inf'))
-                                merged_conditions[varname][op] = max(value, varval)
+                                value = merged_conditions[varname].get(op, float('+inf'))
+                                merged_conditions[varname][op] = min(value, varval)
 
                         predicates = []
                         for varname, conditions in merged_conditions.items():
