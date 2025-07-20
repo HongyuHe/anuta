@@ -20,22 +20,25 @@ from anuta.constructor import Constructor, Cidds001
 from anuta.theory import Theory
 from anuta.known import *
 from anuta.utils import log, to_big_camelcase
+from anuta.cli import FLAGS
 
 
 def get_featuregroups(df: pd.DataFrame, feature_marker: str='') -> Dict[str, List[Tuple[str, ...]]]:
     """Generate all feature groups for the given variables."""
+    log.info(f"Generating feature groups with marker '{feature_marker}'")
     featuregroups = defaultdict(list)
     variables = list(df.columns)
     for target in variables:
-        if len(df[target].unique()) <= 1:
+        if df[target].nunique() <= 1:
             # Skip targets with only one unique value
             continue
         features = [v for v in variables if v != target and feature_marker in v]
-        for n in range(1, len(features)+1):
+        max_nfeatures = min(len(features), FLAGS.config.TREE_ARITY_LIMIT)
+        for n in range(1, max_nfeatures+1):
             _featuregroup = [list(combo) for combo in itertools.combinations(features, n)]
             featuregroup = []
             for combo in _featuregroup:
-                if len(combo) == 1 and len(df[combo[0]].unique()) == 1:
+                if len(combo) == 1 and df[combo[0]].nunique() == 1:
                     # Only include feature groups with more than one unique value
                     continue
                 else:
@@ -54,8 +57,9 @@ class TreeLearner(object):
             self.num_examples = 'all'
             
         self.dataset = constructor.label
-        assert self.dataset in ['cidds', 'yatesbury', 'metadc'], \
-            f"Unsupported dataset: {self.dataset}. Supported datasets: ['cidds', 'yatesbury', 'metadc']"
+        supported_datasets = ['cidds', 'yatesbury', 'metadc', 'netflix']
+        assert self.dataset in supported_datasets, \
+            f"Unsupported dataset: {self.dataset}. Supported datasets: {supported_datasets}."
         self.examples = constructor.df.copy()
         self.examples[constructor.categoricals] = \
             self.examples[constructor.categoricals].astype('category')
@@ -527,11 +531,11 @@ class XgboostTreeLearner(TreeLearner):
                             values = var_conditions[varname].get(op, set())
                             var_conditions[varname][op] = values | set(varval)
                         elif op == '≥':
-                            value = var_conditions[varname].get(op, float('+inf'))
-                            var_conditions[varname][op] = min(value, varval)
-                        elif op == '<':
                             value = var_conditions[varname].get(op, float('-inf'))
                             var_conditions[varname][op] = max(value, varval)
+                        elif op == '<':
+                            value = var_conditions[varname].get(op, float('+inf'))
+                            var_conditions[varname][op] = min(value, varval)
 
                     predicates = []
                     for varname, merged_conditions in var_conditions.items():
@@ -795,7 +799,7 @@ class LightGbmTreeLearner(TreeLearner):
         super().__init__(constructor, limit)
         
         common_config = {
-            'n_estimators': 1,
+            'n_estimators': 1,  #* Force one tree per feature group (no boosting)
             'lambda_l1': 0.0,
             'lambda_l2': 0.0,         # or 1e-6 to stabilize
             'learning_rate': 1,

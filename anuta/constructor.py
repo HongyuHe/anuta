@@ -213,49 +213,59 @@ class Netflix(Constructor):
     def __init__(self, filepath) -> None:
         super().__init__()
         self.label = 'netflix'
-        STRIDE = 2
+        STRIDE = 1
         WINDOW = 3
         
         log.info(f"Loading data from {filepath}")
-        self.df = pd.read_csv(filepath, parse_dates=['frame.time'])
-        #! Some packets are truncated, so the frame.len ≤ actual packet size (impact sequence numbers).
-        # self.df = self.df[self.df['_ws.col.info'].str.contains('Packet size limited during capture')==False]
-        self.df['_ws.col.info'], self.df['tcp.window_size_value'] = '', ''
-        self.df.drop(columns=['tcp.window_size_value', 'frame.len', '_ws.col.info'], inplace=True)
-        if 'Unnamed: 0' in self.df.columns:
-            self.df.drop(columns=['Unnamed: 0'], inplace=True)
-        self.df['tcp.flags'] = self.df['tcp.flags'].apply(parse_tcp_flags)
-        self.df = self.df.sort_values(by=['frame.time', 'tcp.seq']).reset_index(drop=True)
-        self.df.rename(columns=rename_pcap(self.df.columns), inplace=True)
+        self.df = pd.read_csv(filepath)
+        self.df["frame.time_epoch"] = pd.to_datetime(self.df["frame.time_epoch"], unit="s")
+        self.df['tcp.flags'] = self.df['tcp.flags'].apply(int, base=16)
+        self.df = self.df.rename(columns=rename_pcap(self.df.columns))[used_pcap_cols]
+        self.df['tcp_window_size_scalefactor'] = self.df['tcp_window_size_scalefactor'].fillna(value=1).astype(int)
         
-        #! Temporarily remove these columns.
-        self.df.drop(columns=['tsval', 'tsecr'], inplace=True)
-        self.df.loc[(self.df.tcp_srcport==443) | (self.df.tcp_srcport==40059), 'ip_src'] = "198.38.120.153"
-        self.df.loc[(self.df.tcp_srcport!=443) & (self.df.tcp_srcport!=40059), 'ip_src'] = "192.168.43.72"
-        self.df.loc[(self.df.tcp_dstport==443) | (self.df.tcp_dstport==40059), 'ip_dst'] = "198.38.120.153"
-        self.df.loc[(self.df.tcp_dstport!=443) & (self.df.tcp_dstport!=40059), 'ip_dst'] = "192.168.43.72"
-        
-        self.df['ip_src'] = self.df['ip_src'].apply(netflix_ip_map)
-        self.df['ip_dst'] = self.df['ip_dst'].apply(netflix_ip_map)
-        self.df['protocol'] = self.df['protocol'].apply(netflix_proto_map)
-        self.df['tcp_flags'] = self.df['tcp_flags'].apply(netflix_flags_map)
-        self.df['tcp_srcport'] = self.df['tcp_srcport'].apply(netflix_port_map)
-        self.df['tcp_dstport'] = self.df['tcp_dstport'].apply(netflix_port_map)
-        
-        if 'frame_number' in self.df.columns:
-            self.df.drop(columns=['frame_number'], inplace=True)
-        if 'frame_time' in self.df.columns:
-            self.df.drop(columns=['frame_time'], inplace=True)
-        self.df = generate_sliding_windows(self.df, stride=STRIDE, window=WINDOW)
-        
+        df = self.df
+        # Step 1:Apply the normalization
+        flow_keys = df.apply(normalize_5tuple, axis=1)
+        df = pd.concat([df, flow_keys], axis=1)
+
+        # Step 2: Sort by normalized 5-tuple and frame_time_epoch
+        df_sorted = df.sort_values(
+            by=["flow_ip_1", "flow_ip_2", "flow_port_1", "flow_port_2", "flow_proto", "frame_time_epoch"]
+        )
+
+        # Step 3: Group by normalized 5-tuple
+        grouped = df_sorted.groupby(["flow_ip_1", "flow_ip_2", "flow_port_1", "flow_port_2", "flow_proto"])
+
+        for flow_id, flow_df in grouped:
+            log.info(f"Flow {flow_id}: {len(flow_df)} packets")
+        #! Assuming single flow for now.
+        self.df = flow_df.drop(columns=flow_keys)
+        todrop = ['frame_number', 'frame_time_epoch']
+        for col in todrop:
+            if col in self.df.columns:
+                self.df.drop(columns=[col], inplace=True)
         col_to_var = {col: to_big_camelcase(col, sep='_') for col in self.df.columns}
         self.df.rename(columns=col_to_var, inplace=True)
+        assert self.df.IpSrc.nunique() == self.df.IpDst.nunique() == 2, "Expected 2 IPs in a flow."
+        assert self.df.TcpSrcport.nunique() == self.df.TcpDstport.nunique() == 2, "Expected 2 ports in a flow."
+        #* Encode the IPs to 0 and 1.
+        ip_map = {ip: i for i, ip in enumerate(self.df.IpSrc.unique())}
+        self.df['IpSrc'] = self.df['IpSrc'].apply(lambda x: ip_map[x])
+        self.df['IpDst'] = self.df['IpDst'].apply(lambda x: ip_map[x])
+        #* Encode the ports to 0 and 1.
+        port_map = {port: i for i, port in enumerate(self.df.TcpSrcport.unique())}
+        self.df['TcpSrcport'] = self.df['TcpSrcport'].apply(lambda x: port_map[x])
+        self.df['TcpDstport'] = self.df['TcpDstport'].apply(lambda x: port_map[x])
+        self.df = self.df.astype(int)
+        
+        self.df = generate_sliding_windows(self.df, stride=STRIDE, window=WINDOW)
+        
         variables = list(self.df.columns)
         self.categoricals = []
         for name in self.df.columns:
-            if not any(keyword in name.lower() for keyword in ('seq', 'ack', 'len', 'ts')):
+            if any(keyword in name.lower() for keyword in ('src', 'dst', 'proto', 'flags')):
                 self.categoricals.append(name)
-        
+        print(f"Categorical variables: {self.categoricals}")
         domains = {}
         for name in self.df.columns:
             if name not in self.categoricals:
@@ -281,9 +291,9 @@ class Netflix(Constructor):
                     values=netflix_tcplen_limits
                 )
         self.anuta = Anuta(variables, domains, self.constants)
-        pprint(self.anuta.variables)
-        pprint(self.anuta.domains)
-        pprint(self.anuta.constants)
+        # pprint(self.anuta.variables)
+        # pprint(self.anuta.domains)
+        # pprint(self.anuta.constants)
         return
     
     def get_indexset_and_counter(

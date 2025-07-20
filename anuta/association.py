@@ -46,7 +46,7 @@ def get_missing_domain_rules(examples, domains) -> List[str]:
     return rules
 
 class AsscoriationRuleLearner:
-    def __init__(self, constructor: Constructor, algorithm='fpgrowth', 
+    def __init__(self, constructor: Constructor, algorithm='hmine', 
                  limit=None, min_support=1e-10, **kwargs):
         self.algorithm = algorithm
         self.min_support = min_support

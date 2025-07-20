@@ -110,7 +110,11 @@ def netflix_proto_map(proto: str):
         return 1
 
 #******************** Netflix data Domain Knowledge ends ********************
-
+used_pcap_cols = ['frame_number', 'frame_time_epoch', 'frame_len',
+       'ip_len', 'ip_hdr_len', 'ip_ttl', 'ip_proto', 'ip_src', 'ip_dst', 'tcp_srcport',
+       'tcp_dstport', 'tcp_hdr_len', 'tcp_len', 'tcp_flags', 'tcp_seq',
+       'tcp_ack', 'tcp_urgent_pointer', 'tcp_window_size_value', 'tcp_window_size_scalefactor', 'tcp_window_size', 'tsval', 'tsecr']
+five_tuple_cols = ["ip_src", "ip_dst", "tcp_srcport", "tcp_dstport", "ip_proto"]
 popular_ports = [
     # TCP Ports
     20, 21, 22, 23, 25, 53, 80, 110, 143, 443,

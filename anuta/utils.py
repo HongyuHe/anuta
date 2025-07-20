@@ -42,6 +42,19 @@ for varname in metadc_ints:
     z3evalmap[varname] = z3.Int(varname)
 #TODO: Add vars from other datasets
 
+
+def normalize_5tuple(row):
+    # Sort IP addresses and port numbers to normalize direction
+    ip_pair = sorted([row["ip_src"], row["ip_dst"]])
+    port_pair = sorted([row["tcp_srcport"], row["tcp_dstport"]])
+    return pd.Series({
+        "flow_ip_1": ip_pair[0],
+        "flow_ip_2": ip_pair[1],
+        "flow_port_1": port_pair[0],
+        "flow_port_2": port_pair[1],
+        "flow_proto": row["ip_proto"]
+    })
+
 def transform_consequent(expression):
     """
     Transform an implication so that terms in the consequent (right-hand side)
