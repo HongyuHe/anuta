@@ -33,17 +33,18 @@ def get_featuregroups(df: pd.DataFrame, feature_marker: str='') -> Dict[str, Lis
             # Skip targets with only one unique value
             continue
         features = [v for v in variables if v != target and feature_marker in v]
-        max_nfeatures = min(len(features), FLAGS.config.TREE_ARITY_LIMIT)
-        for n in range(1, max_nfeatures+1):
-            _featuregroup = [list(combo) for combo in itertools.combinations(features, n)]
-            featuregroup = []
-            for combo in _featuregroup:
-                if len(combo) == 1 and df[combo[0]].nunique() == 1:
-                    # Only include feature groups with more than one unique value
-                    continue
-                else:
-                    featuregroup.append(combo)
-            featuregroups[target] += featuregroup
+        featuregroups[target].append(features)
+        # max_nfeatures = min(len(features), FLAGS.config.TREE_ARITY_LIMIT)
+        # for n in range(1, max_nfeatures+1):
+        #     _featuregroup = [list(combo) for combo in itertools.combinations(features, n)]
+        #     featuregroup = []
+        #     for combo in _featuregroup:
+        #         if len(combo) == 1 and df[combo[0]].nunique() == 1:
+        #             # Only include feature groups with more than one unique value
+        #             continue
+        #         else:
+        #             featuregroup.append(combo)
+        #     featuregroups[target] += featuregroup
     return featuregroups
 
 class TreeLearner(object):
