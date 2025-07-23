@@ -134,5 +134,5 @@ if __name__ == '__main__':
                 f.write(violation_record + '\n')
 
     sys.exit(
-        pprint("Configuration:", dict(FLAGS.config), sep='\n')
+        pprint("Configurations:", dict(FLAGS.config), sep='\n')
     )

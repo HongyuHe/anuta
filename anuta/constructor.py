@@ -225,7 +225,7 @@ class Netflix(Constructor):
         
         df = self.df
         # Step 1:Apply the normalization
-        flow_keys = df.apply(normalize_5tuple, axis=1)
+        flow_keys = df.apply(normalize_pcap_5tuple, axis=1)
         df = pd.concat([df, flow_keys], axis=1)
 
         # Step 2: Sort by normalized 5-tuple and frame_time_epoch
@@ -238,7 +238,7 @@ class Netflix(Constructor):
 
         for flow_id, flow_df in grouped:
             log.info(f"Flow {flow_id}: {len(flow_df)} packets")
-        #! Assuming single flow for now.
+        #! Assuming a single (bidirectional) flow for now.
         self.df = flow_df.drop(columns=flow_keys)
         todrop = ['frame_number', 'frame_time_epoch']
         for col in todrop:

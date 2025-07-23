@@ -34,17 +34,31 @@ def get_featuregroups(df: pd.DataFrame, feature_marker: str='') -> Dict[str, Lis
             continue
         features = [v for v in variables if v != target and feature_marker in v]
         featuregroups[target].append(features)
-        # max_nfeatures = min(len(features), FLAGS.config.TREE_ARITY_LIMIT)
-        # for n in range(1, max_nfeatures+1):
-        #     _featuregroup = [list(combo) for combo in itertools.combinations(features, n)]
-        #     featuregroup = []
-        #     for combo in _featuregroup:
-        #         if len(combo) == 1 and df[combo[0]].nunique() == 1:
-        #             # Only include feature groups with more than one unique value
-        #             continue
-        #         else:
-        #             featuregroup.append(combo)
-        #     featuregroups[target] += featuregroup
+        # for feature in features:
+        #     #* OOF grouping
+        #     featuregroups[target].append([feature])
+            
+        #     # suppressed = features.copy()
+        #     # #* Suppress the current feature from the group
+        #     # suppressed.remove(feature)
+        #     # featuregroups[target].append(suppressed)
+            
+        # # max_nfeatures = min(len(features), FLAGS.config.TREE_ARITY_LIMIT)
+        # for n in range(1, len(features)+1):
+        n = 2
+        _featuregroup = [list(combo) for combo in itertools.combinations(features, n)]
+        featuregroup = []
+        nskiped = 0
+        for combo in _featuregroup:
+            if df[combo].drop_duplicates().shape[0] == 1:
+                # Only include feature groups with more than one unique value
+                # log.info(f"Skipping {combo=} with only one unique value.")
+                nskiped += 1
+                continue
+            else:
+                featuregroup.append(combo)
+        log.info(f"Skipped {nskiped} feature groups with 1 unique value for {target}.")
+        featuregroups[target] += featuregroup
     return featuregroups
 
 class TreeLearner(object):
@@ -98,7 +112,7 @@ class EntropyTreeLearner(TreeLearner):
             ntrees=1,                 # Build only one tree
             max_depth=len(self.features),
             min_rows=1,               # Minimum number of observations in a leaf
-            min_split_improvement=1e-6,
+            min_split_improvement=FLAGS.config.MIN_SPLIT_GAIN,
             sample_rate=1.0,          # Use all rows
             mtries=-2,                # Use all features (set to -2 for all features)
             seed=42,                  # For reproducibility
@@ -108,8 +122,8 @@ class EntropyTreeLearner(TreeLearner):
             # model_id="reg_tree",
             ntrees=1,                 # Build only one tree
             max_depth=len(self.features)//2, #TODO: To be tuned
-            #* Minimum number of observations in a leaf)
-            min_rows=100,             #TODO: To be tuned
+            # min_rows=2,             ##* Minimum number of observations for a leaf to split
+            min_split_improvement=FLAGS.config.MIN_SPLIT_GAIN,
             sample_rate=1.0,          # Use all rows
             mtries=-2,                # Use all features (set to -2 for all features)
             seed=42,                  # For reproducibility
@@ -150,12 +164,13 @@ class EntropyTreeLearner(TreeLearner):
                 dtree = H2ORandomForestEstimator(**params)
                 try:
                     dtree.train(x=list(features), y=target, training_frame=self.examples)  
+                    self.trees[target].append(dtree)
+                    treeid += 1
                 except Exception as e:
+                    #* H2O lib is not very robust and can fail with various errors ...
                     log.error(f"Failed to train tree for {target} with features {features}: {e}")
-                    exit(1)
-                self.trees[target].append(dtree)
+                    # exit(1)
                 print(f"... Trained {treeid}/{self.total_treegroups} ({treeid/self.total_treegroups:.1%}) tree groups ({target=}).", end='\r')
-                treeid += 1
         end = perf_counter()
         log.info(f"Training {self.total_treegroups} tree groups took {end - start:.2f} seconds.")
         
@@ -196,7 +211,7 @@ class EntropyTreeLearner(TreeLearner):
                     ruleset = defaultdict(dict)
                     '''Collect leaf ranges for regression trees'''
                     dtree: H2ORandomForestEstimator = self.trees[target][treeidx]
-                    leaf_assignments = dtree.predict_leaf_node_assignment(self.examples)
+                    leaf_assignments = dtree.predict_leaf_node_assignment(self.examples, 'Node_ID')# 'Path')
                     #* Bind leaf assignments with original target column
                     hf_leaf = self.examples.cbind(leaf_assignments)
                     leaf_col = leaf_assignments.columns[0]
@@ -217,7 +232,7 @@ class EntropyTreeLearner(TreeLearner):
                     for record in records:
                         merged_conditions = {}
                         for condition in record['conditions']:
-                            varname, op, varval = condition.split('_')
+                            varname, op, varval = condition.split('$')
                             varval = eval(varval)
                             if varname not in merged_conditions:
                                 merged_conditions[varname] = defaultdict(None)
@@ -276,9 +291,11 @@ class EntropyTreeLearner(TreeLearner):
                                 assert set(['≤', '>']) & operators, f"{varname} has no recognizd {conditions=}"
                                 valmin = conditions.get('>', float('-inf'))
                                 valmax = conditions.get('≤', float('+inf'))
-                                if valmin >= valmax:
+                                if valmin > valmax:
                                     #TODO: Accumulate logits to decide which condition to take. Discard all together for now.
                                     print(f"[Conflicting condition!!!]: {varname=}:{conditions}")
+                                if valmin == valmax:
+                                    predicates.append(f"Eq({varname}, {valmin})")
                                 else:
                                     if valmin > float('-inf'):
                                         predicates.append(f"({varname} > {valmin})")
@@ -291,17 +308,22 @@ class EntropyTreeLearner(TreeLearner):
                                 conclusion = f"Eq({target}, {targetcls})"
                                 ruleset[premise].add(conclusion)
                             else:
-                                leafid = record['pathid'].split('-')[1]
-                                leafmin = leaf_ranges[leafid]['min']
-                                leafmax = leaf_ranges[leafid]['max']
-                                ruleset[premise]['min'] = min(
-                                    ruleset[premise].get('min', float('+inf')), 
-                                    leafmin
-                                )
-                                ruleset[premise]['max'] = max(
-                                    ruleset[premise].get('max', float('-inf')), 
-                                    leafmax
-                                )
+                                leafid = record['pathid'] # record['pathid'].split('-')[1]
+                                if leafid not in leaf_ranges:
+                                    #* There could be empty splits in the tree 
+                                    #*  (e.g., `min_rows=2` and both examples are classified to the child)
+                                    print(f"[Warning] {leafid=} not found in `leaf_ranges` for {target}.")
+                                else:
+                                    leafmin = leaf_ranges[leafid]['min']
+                                    leafmax = leaf_ranges[leafid]['max']
+                                    ruleset[premise]['min'] = min(
+                                        ruleset[premise].get('min', float('+inf')), 
+                                        leafmin
+                                    )
+                                    ruleset[premise]['max'] = max(
+                                        ruleset[premise].get('max', float('-inf')), 
+                                        leafmax
+                                    )
 
                 rules = set()
                 for premise, conclusions in ruleset.items():
@@ -353,7 +375,7 @@ class EntropyTreeLearner(TreeLearner):
                 logits.add(node.prediction)
                 if node.prediction > MIN_LOGIT:
                     paths.append({
-                        'pathid': f"{tree_index}-{leaf_id}",
+                        'pathid': node.id, # f"{tree_index}-{leaf_id}",
                         'logit': node.prediction,
                         'conditions': path.copy()
                     })
@@ -366,15 +388,15 @@ class EntropyTreeLearner(TreeLearner):
                 left_categories = sorted([int(v) for v in node.left_levels])
                 right_categories = sorted([int(v) for v in node.right_levels])
                 if node.left_levels:
-                    cond_left = f"{varname}_∈_{left_categories}"
-                    cond_right = f"{varname}_∉_{left_categories}"
+                    cond_left = f"{varname}$∈${left_categories}"
+                    cond_right = f"{varname}$∉${left_categories}"
                 else:
-                    cond_left = f"{varname}_∉_{right_categories}"
-                    cond_right = f"{varname}_∈_{right_categories}"
+                    cond_left = f"{varname}$∉${right_categories}"
+                    cond_right = f"{varname}$∈${right_categories}"
             else:
                 # Numeric split
-                cond_left = f"{varname}_≤_{node.threshold}"
-                cond_right = f"{varname}_>_{node.threshold}"
+                cond_left = f"{varname}$≤${node.threshold}"
+                cond_right = f"{varname}$>${node.threshold}"
 
             #* Resulting path IDs: 0-LRRL
             recurse(node.left_child, path + [cond_left], path_suffix + "L", tree_index)
@@ -510,6 +532,7 @@ class XgboostTreeLearner(TreeLearner):
                 assumptions.add(f"{varname} <= {domain[1]}")
         rules = self.learned_rules | assumptions
         sprules = [sp.sympify(rule) for rule in rules]
+        sprules = list(filter(lambda r: r != sp.true, sprules))  # Remove trivial rules
         Theory.save_constraints(sprules, f'xgb_{self.dataset}_{self.num_examples}.pl')
         
         return
@@ -523,7 +546,7 @@ class XgboostTreeLearner(TreeLearner):
                 for record in conditions:
                     var_conditions = {}
                     for condition in record['conditions']:
-                        varname, op, varval = condition.split('_')
+                        varname, op, varval = condition.split('$')
                         varval = eval(varval)
                         if varname not in var_conditions:
                             var_conditions[varname] = defaultdict(None)
@@ -653,13 +676,13 @@ class XgboostTreeLearner(TreeLearner):
                     }
                     conditions = []
                     for split in path['Path']:
-                        if split['Gain'] <= MIN_GAIN: continue
+                        if split['Gain'] <= FLAGS.config.MIN_SPLIT_GAIN: continue
                         if split['NodeID'] in useless_splits: continue
 
                         varname = split['Feature']
                         if split['Split'] is not None:
                             op = '<' if split['Direction']=='Yes' else '≥'
-                            condition = f"{varname}_{op}_{split['Split']}"
+                            condition = f"{varname}${op}${split['Split']}"
                         else:
                             assert split['Category'] is not None
                             op = '∈' if split['Direction'] == 'Yes' else '∉'
@@ -668,7 +691,7 @@ class XgboostTreeLearner(TreeLearner):
                                 self.examples[varname].astype('category').cat.categories[int(v)] 
                                 for v in split['Category']
                             ]
-                            condition = f"{varname}_{op}_{categories}"
+                            condition = f"{varname}${op}${categories}"
                         conditions.append(condition)
 
                     if conditions:
@@ -806,9 +829,11 @@ class LightGbmTreeLearner(TreeLearner):
             'learning_rate': 1,
             'verbose': -1,
             
+            'feature_fraction': 1.0,  # use all features
+            'feature_fraction_bynode': 1.0,  # use all features in each node
             # 'min_data_in_leaf': 1,        # allow small leaves
             # 'min_sum_hessian_in_leaf': 1e-10,  # loosen constraints
-            'min_gain_to_split': 1e-6,
+            'min_gain_to_split': FLAGS.config.MIN_SPLIT_GAIN,
             'boosting_type': 'gbdt',
             'force_col_wise': True,        # deterministic feature ordering
             # 'categorical_feature': 'auto', # f"name:{','.join(self.categoricals)}",  
@@ -923,7 +948,7 @@ class LightGbmTreeLearner(TreeLearner):
                 for record in conditions:
                     var_conditions = {}
                     for condition in record['conditions']:
-                        varname, op, varval = condition.split('_')
+                        varname, op, varval = condition.split('$')
                         varval = eval(varval)
                         if varname not in var_conditions:
                             var_conditions[varname] = defaultdict(None)
@@ -1081,11 +1106,11 @@ class LightGbmTreeLearner(TreeLearner):
                     self.examples[feat_name].astype('category').cat.categories[int(v)] 
                     for v in threshold.split('||')
                 ]
-                cond_left = f"{feat_name}_∈_{left_vals}"
-                cond_right = f"{feat_name}_∉_{left_vals}"
+                cond_left = f"{feat_name}$∈${left_vals}"
+                cond_right = f"{feat_name}$∉${left_vals}"
             else:  # Numeric split
-                cond_left = f"{feat_name}_≤_{threshold}"
-                cond_right = f"{feat_name}_>_{threshold}"
+                cond_left = f"{feat_name}$≤${threshold}"
+                cond_right = f"{feat_name}$>${threshold}"
 
             recurse(node['left_child'], path_conditions + [cond_left], tree_idx)
             recurse(node['right_child'], path_conditions + [cond_right], tree_idx)

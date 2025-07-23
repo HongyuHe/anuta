@@ -32,7 +32,12 @@ def z3implies(a, b): return z3.Implies(a, b)
 def z3equiv(a, b): return a == b
 def z3max(*args):
     return reduce(lambda a, b: z3.If(a >= b, a, b), args)
-z3evalmap = {'Eq': z3eq, 'Ne': z3ne, 'And': z3and, 'Or': z3or, 'Implies': z3implies, 'Equivalent': z3equiv, 'Max': z3max}
+def z3mod(a, b):
+    # assert z3.is_int(a) and z3.is_int(b), \
+    #     f"Z3 mode operator supports only integer types, got {type(a)} and {type(b)}"
+    return a % b
+z3evalmap = {'Eq': z3eq, 'Ne': z3ne, 'And': z3and, 'Or': z3or, 
+             'Implies': z3implies, 'Equivalent': z3equiv, 'Max': z3max, 'Mod': z3mod}
 
 for varname in cidds_categoricals + cidds_ints:
     z3evalmap[varname] = z3.Int(varname)
@@ -40,10 +45,13 @@ for varname in cidds_floats:
     z3evalmap[varname] = z3.Real(varname)
 for varname in metadc_ints:
     z3evalmap[varname] = z3.Int(varname)
+#TODO: Improve this ugly piece
+for varname in ['FrameLen_1','IpLen_1','IpHdrLen_1','IpTtl_1','IpProto_1','IpSrc_1','IpDst_1','TcpSrcport_1','TcpDstport_1','TcpHdrLen_1','TcpLen_1','TcpFlags_1','TcpSeq_1','TcpAck_1','TcpUrgentPointer_1','TcpWindowSizeValue_1','TcpWindowSizeScalefactor_1','TcpWindowSize_1','Tsval_1','Tsecr_1','FrameLen_2','IpLen_2','IpHdrLen_2','IpTtl_2','IpProto_2','IpSrc_2','IpDst_2','TcpSrcport_2','TcpDstport_2','TcpHdrLen_2','TcpLen_2','TcpFlags_2','TcpSeq_2','TcpAck_2','TcpUrgentPointer_2','TcpWindowSizeValue_2','TcpWindowSizeScalefactor_2','TcpWindowSize_2','Tsval_2','Tsecr_2','FrameLen_3','IpLen_3','IpHdrLen_3','IpTtl_3','IpProto_3','IpSrc_3','IpDst_3','TcpSrcport_3','TcpDstport_3','TcpHdrLen_3','TcpLen_3','TcpFlags_3','TcpSeq_3','TcpAck_3','TcpUrgentPointer_3','TcpWindowSizeValue_3','TcpWindowSizeScalefactor_3','TcpWindowSize_3','Tsval_3','Tsecr_3']:
+    z3evalmap[varname] = z3.Int(varname)  #* For Netflix dataset, all variables are integers
 #TODO: Add vars from other datasets
 
 
-def normalize_5tuple(row):
+def normalize_pcap_5tuple(row):
     # Sort IP addresses and port numbers to normalize direction
     ip_pair = sorted([row["ip_src"], row["ip_dst"]])
     port_pair = sorted([row["tcp_srcport"], row["tcp_dstport"]])

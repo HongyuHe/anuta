@@ -42,7 +42,8 @@
 # tcp.seq : Sequence number
 # tcp.ack : Acknowledgment number
 # tcp.urgent_pointer : Urgent pointer (rarely used)
-# tcp.window_size_value : Advertised window size
+# tcp.window_size_value : The window size value from the TCP header
+# tcp.window_size : The scaled window size (if scaling has been used)
 # tcp.checksum : TCP checksum
 # tcp.options : Full TCP options string
 # tcp.options.timestamp.tsval : TCP timestamp value (TSval)
@@ -59,6 +60,14 @@
 
 # === Output to file ===
 # "$2" : Output CSV file
+
+# Removed fields (check `tshark -G fields | grep tcp.window_size`):
+#   -e tcp.options.wscale \
+#   -e tcp.options.wscale.shift \
+#   -e tcp.options.wscale.multiplier \
+#   -e tcp.options.mss_val \
+#   -e tcp.checksum \
+#   -e udp.checksum \
 
 tshark -r "$1" -T fields -E separator=, -E quote=d -E header=y \
   -e frame.number \
@@ -88,13 +97,12 @@ tshark -r "$1" -T fields -E separator=, -E quote=d -E header=y \
   -e tcp.ack \
   -e tcp.urgent_pointer \
   -e tcp.window_size_value \
-  -e tcp.checksum \
-  -e tcp.options \
+  -e tcp.window_size_scalefactor \
+  -e tcp.window_size \
   -e tcp.options.timestamp.tsval \
   -e tcp.options.timestamp.tsecr \
   -e udp.srcport \
   -e udp.dstport \
   -e udp.length \
-  -e udp.checksum \
   -e _ws.col.Protocol \
   > "$2"
