@@ -33,7 +33,6 @@ def get_featuregroups(df: pd.DataFrame, feature_marker: str='') -> Dict[str, Lis
             # Skip targets with only one unique value
             continue
         features = [v for v in variables if v != target and feature_marker in v]
-        featuregroups[target].append(features)
         # for feature in features:
         #     #* OOF grouping
         #     featuregroups[target].append([feature])
@@ -44,21 +43,26 @@ def get_featuregroups(df: pd.DataFrame, feature_marker: str='') -> Dict[str, Lis
         #     # featuregroups[target].append(suppressed)
             
         # # max_nfeatures = min(len(features), FLAGS.config.TREE_ARITY_LIMIT)
-        # for n in range(1, len(features)+1):
-        n = 2
-        _featuregroup = [list(combo) for combo in itertools.combinations(features, n)]
-        featuregroup = []
-        nskiped = 0
-        for combo in _featuregroup:
-            if df[combo].drop_duplicates().shape[0] == 1:
-                # Only include feature groups with more than one unique value
-                # log.info(f"Skipping {combo=} with only one unique value.")
-                nskiped += 1
-                continue
-            else:
-                featuregroup.append(combo)
-        log.info(f"Skipped {nskiped} feature groups with 1 unique value for {target}.")
-        featuregroups[target] += featuregroup
+        combo_size = FLAGS.config.MAX_COMBO_SIZE
+        if combo_size < 0:
+            combo_size = len(features)
+        #* In any case, include the full feature set.
+        featuregroups[target].append(features)   
+        for n in range(1, combo_size):
+            _featuregroup = [list(combo) for combo in itertools.combinations(features, n)]
+            featuregroup = []
+            nskiped = 0
+            for combo in _featuregroup:
+                # if df[combo].drop_duplicates().shape[0] == 1:
+                if len(set(map(tuple, df[combo].itertuples(index=False, name=None)))) == 1:
+                    # Only include feature groups with more than one unique value
+                    # log.info(f"Skipping {combo=} with only one unique value.")
+                    nskiped += 1
+                    continue
+                else:
+                    featuregroup.append(combo)
+            log.info(f"Skipped {nskiped} feature groups with 1 unique value for {target}.")
+            featuregroups[target] += featuregroup
     return featuregroups
 
 class TreeLearner(object):
@@ -169,6 +173,7 @@ class EntropyTreeLearner(TreeLearner):
                 except Exception as e:
                     #* H2O lib is not very robust and can fail with various errors ...
                     log.error(f"Failed to train tree for {target} with features {features}: {e}")
+                    self.trees[target].append(None)
                     # exit(1)
                 print(f"... Trained {treeid}/{self.total_treegroups} ({treeid/self.total_treegroups:.1%}) tree groups ({target=}).", end='\r')
         end = perf_counter()
@@ -352,6 +357,10 @@ class EntropyTreeLearner(TreeLearner):
                 trees, desc=f"Extracting paths from trees of {target}"
             )):
                 # print(f"Features: {self.featuregroups[target][treeidx]}")
+                if dtree is None:
+                    #* Skip trees that failed to train
+                    all_tree_paths[target].append({})
+                    continue
                 paths = self.extract_tree_paths(dtree, target)
                 #* Paths could be empty `{}`, but keep it 
                 #*  to match the indexing of `self.trees` to `all_tree_paths`
