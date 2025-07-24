@@ -48,10 +48,10 @@ def get_featuregroups(df: pd.DataFrame, feature_marker: str='') -> Dict[str, Lis
             combo_size = len(features)
         #* In any case, include the full feature set.
         featuregroups[target].append(features)   
+        nskiped = 0
         for n in range(1, combo_size):
             _featuregroup = [list(combo) for combo in itertools.combinations(features, n)]
             featuregroup = []
-            nskiped = 0
             for combo in _featuregroup:
                 # if df[combo].drop_duplicates().shape[0] == 1:
                 if len(set(map(tuple, df[combo].itertuples(index=False, name=None)))) == 1:
@@ -61,8 +61,8 @@ def get_featuregroups(df: pd.DataFrame, feature_marker: str='') -> Dict[str, Lis
                     continue
                 else:
                     featuregroup.append(combo)
-            log.info(f"Skipped {nskiped} feature groups with 1 unique value for {target}.")
             featuregroups[target] += featuregroup
+        log.info(f"{target}: Skipped {nskiped} feature groups with single unique value.")
     return featuregroups
 
 class TreeLearner(object):
@@ -108,9 +108,9 @@ class EntropyTreeLearner(TreeLearner):
             self.examples[self.categoricals] = self.examples[self.categoricals].asfactor()
 
         self.model_configs = {}
-        num_examples = self.examples.shape[0]
-        min_rows = int(num_examples * 0.01) if num_examples > 100 else 1
-        log.info(f"Setting {min_rows=}.")
+        # num_examples = self.examples.shape[0]
+        # min_rows = int(num_examples * 0.01) if num_examples > 100 else 1
+        # log.info(f"Setting {min_rows=}.")
         self.model_configs['classification'] = dict(
             # model_id="clf_tree",
             ntrees=1,                 # Build only one tree
@@ -354,7 +354,7 @@ class EntropyTreeLearner(TreeLearner):
         all_tree_paths = defaultdict(list)
         for target, trees in self.trees.items():
             for treeidx, dtree in enumerate(tqdm(
-                trees, desc=f"Extracting paths from trees of {target}"
+                trees, desc=f"Extracting tree paths for {target}"
             )):
                 # print(f"Features: {self.featuregroups[target][treeidx]}")
                 if dtree is None:
@@ -740,7 +740,7 @@ class XgboostTreeLearner(TreeLearner):
         all_tree_paths = defaultdict(list)
         for target, trees in self.trees.items():
             for treeidx, model in enumerate(tqdm(
-                trees, desc=f"Extracting paths from trees of {target}"
+                trees, desc=f"Extracting tree paths for {target}"
             )):
                 paths = self.extract_tree_paths(model)
                 #* Paths could be empty `{}`, but keep it 
