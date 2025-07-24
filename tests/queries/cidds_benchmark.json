@@ -1,0 +1,414 @@
+[
+{
+"queries": [
+"Ne(SrcIpAddr, 1)"
+],
+"description": "If a multi- or broadcast IP address appears in the flow, it must be the destination IP address."
+},
+{
+"queries": [
+"Ne(DstIpAddr, 2)"
+],
+"description": "The any-IP binding can only be src IP."
+},
+{
+"queries": [
+"Equivalent(Eq(Proto, 0), Eq(Flags, 1))"
+],
+"description": "If the flow has flags, then the Protocol is TCP (IFF)"
+},
+{
+"queries": [
+"Eq(SrcPt, 80) >> Eq(Proto, 0)",
+"Eq(SrcPt, 443) >> Eq(Proto, 0)",
+"Eq(SrcPt, 8080) >> Eq(Proto, 0)"
+],
+"description": "If one of the ports is either 80, 443 or 8080, then the Protocol is TCP."
+},
+{
+"queries": [
+"Eq(SrcPt, 53) >> Eq(DstIpAddr, 0)"
+],
+"description": "If source port is 53, then the destination IP is private."
+},
+{
+"queries": [
+"Equivalent(Eq(SrcPt, 53), Eq(SrcIpAddr, 4))"
+],
+"description": "If the source port is 53, then the source IP is DNS (IFF)."
+},
+{
+"queries": [
+"Eq(DstPt, 53) >> Eq(DstIpAddr, 4)"
+],
+"description": "If the destination port is 53, then the destination IP is DNS."
+},
+{
+"queries": [
+"Eq(DstIpAddr, 4) >> (Eq(DstPt, 53) | Eq(DstPt, 3))"
+],
+"description": "If the destination IP is DNS, then the destination port is either 53 or 3 (=>)."
+},
+{
+"queries": [
+"Eq(DstIpAddr, 3) >> Ne(SrcPt, 80)",
+"Eq(DstIpAddr, 3) >> Ne(SrcPt, 443)",
+"Eq(DstIpAddr, 3) >> Ne(SrcPt, 8080)"
+],
+"description": "If Destination IP Address is public, then Source Port is not 80/443/8080."
+},
+{
+"queries": [
+"42*Packets <= Bytes",
+"65535*Packets >= Bytes"
+],
+"description": "All packets have a minimum and maximum packet size."
+},
+{
+"queries": [
+"Eq(SrcIpAddr, 3) >> ~(Eq(SrcPt, 137) | Eq(SrcPt, 138))"
+],
+"description": "If source IP Address is public, then source port is neither 137 nor 138."
+},
+{
+"queries": [
+"Eq(DstIpAddr, 3) >> ~(Eq(DstPt, 137) | Eq(DstPt, 138))"
+],
+"description": "If destination IP Address is public, then destination port is neither 137 nor 138."
+},
+{
+"queries": [
+"Eq(SrcIpAddr, 3) >> (Eq(DstIpAddr, 0) | Eq(DstIpAddr, 1))",
+"Eq(SrcIpAddr, 4) >> (Eq(DstIpAddr, 0) | Eq(DstIpAddr, 1))",
+"Eq(DstIpAddr, 3) >> (Eq(SrcIpAddr, 0) | Eq(SrcIpAddr, 2))",
+"Eq(DstIpAddr, 4) >> (Eq(SrcIpAddr, 0) | Eq(SrcIpAddr, 2))"
+],
+"description": "The CIDDS-001 dataset is captured within an emulated company network. Therefore, at least one IP address (source IP address  or destination IP address) of each flow must be internal (starting with 192.168.XXX.XXX or broadcast)."
+},
+{
+"queries": [
+"Eq(DstPt, 137) >> (Eq(DstIpAddr, 1) & Eq(SrcIpAddr, 0))",
+"Eq(DstPt, 138) >> (Eq(DstIpAddr, 1) & Eq(SrcIpAddr, 0))",
+"Or(Eq(DstPt, 137), Eq(DstPt, 138)) >> Eq(DstIpAddr, 1)",
+"Or(Eq(DstPt, 137), Eq(DstPt, 138)) >> Eq(SrcIpAddr, 0)"
+],
+"description": "If the flow represents a NetBIOS message (destination port is 137 or 138), the source IP addresses must be internal (192.168.XXX.XXX) and the destination IP address must be an internal broadcast (192.168.XXX.255)."
+},
+{
+"queries": [
+"Eq(Proto, 2) >> (64*Packets <= Bytes)",
+"Eq(Proto, 2) >> (65535*Packets >= Bytes)"
+],
+"description": "ICMP packets have different packet size limits."
+},
+{
+"queries": [
+"Eq(Proto, 2) >> Eq(SrcPt, 0)"
+],
+"description": "When ICMP is used, the source port is recorded as 0."
+},
+{
+"description": "If destination is private and destination port is NTP (123), then source is public.",
+"queries": [
+"Implies(Eq(DstIpAddr, 0) & Eq(DstPt, 123), Eq(SrcIpAddr, 3))"
+]
+},
+{
+"description": "If destination is private and port is 67 (DHCP server), then source is also private.",
+"queries": [
+"Implies(Eq(DstIpAddr, 0) & Eq(DstPt, 67), Eq(SrcIpAddr, 0))"
+]
+},
+{
+"description": "If destination is private, protocol is ICMP, and source is private, then destination port is 3.",
+"queries": [
+"Implies(Eq(DstIpAddr, 0) & Eq(Proto, 2) & Eq(SrcIpAddr, 0), Eq(DstPt, 3))"
+]
+},
+{
+"description": "If source and destination are private and source port is 0, then destination port is 3.",
+"queries": [
+"Implies(Eq(DstIpAddr, 0) & Eq(SrcIpAddr, 0) & Eq(SrcPt, 0), Eq(DstPt, 3))"
+]
+},
+{
+"description": "If destination is private and source port is 0, then protocol is ICMP.",
+"queries": [
+"Implies(Eq(DstIpAddr, 0) & Eq(SrcPt, 0), Eq(Proto, 2))"
+]
+},
+{
+"description": "If destination is private and source port is 123, then source is public.",
+"queries": [
+"Implies(Eq(DstIpAddr, 0) & Eq(SrcPt, 123), Eq(SrcIpAddr, 3))"
+]
+},
+{
+"description": "If destination is private and source port is 68, then source is private.",
+"queries": [
+"Implies(Eq(DstIpAddr, 0) & Eq(SrcPt, 68), Eq(SrcIpAddr, 0))"
+]
+},
+{
+"description": "If destination is broadcast, then flags are 'noflags' and protocol is UDP.",
+"queries": [
+"Implies(Eq(DstIpAddr, 1), Eq(Flags, 0) & Eq(Proto, 1))"
+]
+},
+{
+"description": "If destination is public, then source is private.",
+"queries": [
+"Implies(Eq(DstIpAddr, 3), Eq(SrcIpAddr, 0))"
+]
+},
+{
+"description": "If destination is DNS and protocol is ICMP, then destination port is 3.",
+"queries": [
+"Implies(Eq(DstIpAddr, 4) & Eq(Proto, 2), Eq(DstPt, 3))"
+]
+},
+{
+"description": "If destination is DNS and source port is 0, then destination port is 3 and protocol is ICMP.",
+"queries": [
+"Implies(Eq(DstIpAddr, 4) & Eq(SrcPt, 0), Eq(DstPt, 3) & Eq(Proto, 2))"
+]
+},
+{
+"description": "If destination is DNS, then source is private.",
+"queries": [
+"Implies(Eq(DstIpAddr, 4), Eq(SrcIpAddr, 0))"
+]
+},
+{
+"description": "If destination port is 0, then destination is public, with no flags, protocol IGMP, source is private with source port 0.",
+"queries": [
+"Implies(Eq(DstPt, 0), Eq(DstIpAddr, 3) & Eq(Flags, 0) & Eq(Proto, 3) & Eq(SrcIpAddr, 0) & Eq(SrcPt, 0))"
+]
+},
+{
+"description": "If destination port is 11, then destination is private with no flags, protocol ICMP, and source is public with source port 0.",
+"queries": [
+"Implies(Eq(DstPt, 11), Eq(DstIpAddr, 0) & Eq(Flags, 0) & Eq(Proto, 2) & Eq(SrcIpAddr, 3) & Eq(SrcPt, 0))"
+]
+},
+{
+"description": "If destination port is 123 and source is private, then destination is public.",
+"queries": [
+"Implies(Eq(DstPt, 123) & Eq(SrcIpAddr, 0), Eq(DstIpAddr, 3))"
+]
+},
+{
+"description": "If destination port is 123, then flags are 'noflags', protocol is UDP, and source port is 123.",
+"queries": [
+"Implies(Eq(DstPt, 123), Eq(Flags, 0) & Eq(Proto, 1) & Eq(SrcPt, 123))"
+]
+},
+{
+"description": "If destination port is 137, then destination is broadcast, no flags, protocol UDP, source is private, source port is 137.",
+"queries": [
+"Implies(Eq(DstPt, 137), Eq(DstIpAddr, 1) & Eq(Flags, 0) & Eq(Proto, 1) & Eq(SrcIpAddr, 0) & Eq(SrcPt, 137))"
+]
+},
+{
+"description": "If destination port is 138, then destination is broadcast, no flags, protocol UDP, source is private, source port is 138.",
+"queries": [
+"Implies(Eq(DstPt, 138), Eq(DstIpAddr, 1) & Eq(Flags, 0) & Eq(Proto, 1) & Eq(SrcIpAddr, 0) & Eq(SrcPt, 138))"
+]
+},
+{
+"description": "If destination port is 3, then flags are 'noflags', protocol is ICMP, and source port is 0.",
+"queries": [
+"Implies(Eq(DstPt, 3), Eq(Flags, 0) & Eq(Proto, 2) & Eq(SrcPt, 0))"
+]
+},
+{
+"description": "If destination port is 53 and flags are 'noflags', then protocol is UDP.",
+"queries": [
+"Implies(Eq(DstPt, 53) & Eq(Flags, 0), Eq(Proto, 1))"
+]
+},
+{
+"description": "If destination port is 67, then flags are 'noflags', protocol is UDP, and source port is 68.",
+"queries": [
+"Implies(Eq(DstPt, 67), Eq(Flags, 0) & Eq(Proto, 1) & Eq(SrcPt, 68))"
+]
+},
+{
+"description": "If destination port is 68, then flags are 'noflags', protocol is UDP, source is private, and source port is 67.",
+"queries": [
+"Implies(Eq(DstPt, 68), Eq(Flags, 0) & Eq(Proto, 1) & Eq(SrcIpAddr, 0) & Eq(SrcPt, 67))"
+]
+},
+{
+"description": "If destination port is 8, then destination is public, flags are 'noflags', protocol is ICMP, source is private, and source port is 0.",
+"queries": [
+"Implies(Eq(DstPt, 8), Eq(DstIpAddr, 3) & Eq(Flags, 0) & Eq(Proto, 2) & Eq(SrcIpAddr, 0) & Eq(SrcPt, 0))"
+]
+},
+{
+"description": "If flags are 'noflags' and source is DNS, then protocol is UDP.",
+"queries": [
+"Implies(Eq(Flags, 0) & Eq(SrcIpAddr, 4), Eq(Proto, 1))"
+]
+},
+{
+"description": "If flags are 'noflags' and source port is 53, then protocol is UDP.",
+"queries": [
+"Implies(Eq(Flags, 0) & Eq(SrcPt, 53), Eq(Proto, 1))"
+]
+},
+{
+"description": "If flags are set, then protocol is TCP.",
+"queries": [
+"Implies(Eq(Flags, 1), Eq(Proto, 0))"
+]
+},
+{
+"description": "If protocol is TCP, then flags must be set.",
+"queries": [
+"Implies(Eq(Proto, 0), Eq(Flags, 1))"
+]
+},
+{
+"description": "If protocol is UDP, then flags are 'noflags'.",
+"queries": [
+"Implies(Eq(Proto, 1), Eq(Flags, 0))"
+]
+},
+{
+"description": "If protocol is ICMP, then flags are 'noflags' and source port is 0.",
+"queries": [
+"Implies(Eq(Proto, 2), Eq(Flags, 0) & Eq(SrcPt, 0))"
+]
+},
+{
+"description": "If protocol is IGMP, then destination is public, port is 0, flags are 'noflags', and source is private with port 0.",
+"queries": [
+"Implies(Eq(Proto, 3), Eq(DstIpAddr, 3) & Eq(DstPt, 0) & Eq(Flags, 0) & Eq(SrcIpAddr, 0) & Eq(SrcPt, 0))"
+]
+},
+{
+"description": "If source is private and source port is 123, then destination is public.",
+"queries": [
+"Implies(Eq(SrcIpAddr, 0) & Eq(SrcPt, 123), Eq(DstIpAddr, 3))"
+]
+},
+{
+"description": "If source is 'any' IP, then destination is broadcast, destination port is 67, flags are 'noflags', protocol is UDP, source port is 68.",
+"queries": [
+"Implies(Eq(SrcIpAddr, 2), Eq(DstIpAddr, 1) & Eq(DstPt, 67) & Eq(Flags, 0) & Eq(Proto, 1) & Eq(SrcPt, 68))"
+]
+},
+{
+"description": "If source is public and source port is 0, then protocol is ICMP.",
+"queries": [
+"Implies(Eq(SrcIpAddr, 3) & Eq(SrcPt, 0), Eq(Proto, 2))"
+]
+},
+{
+"description": "If source is public, then destination is private.",
+"queries": [
+"Implies(Eq(SrcIpAddr, 3), Eq(DstIpAddr, 0))"
+]
+},
+{
+"description": "If source port is 0, then flags are 'noflags'.",
+"queries": [
+"Implies(Eq(SrcPt, 0), Eq(Flags, 0))"
+]
+},
+{
+"description": "If source port is 123, then destination port is 123, flags are 'noflags', and protocol is UDP.",
+"queries": [
+"Implies(Eq(SrcPt, 123), Eq(DstPt, 123) & Eq(Flags, 0) & Eq(Proto, 1))"
+]
+},
+{
+"description": "If source port is 137, then destination is broadcast, destination port is 137, flags are 'noflags', protocol is UDP, and source is private.",
+"queries": [
+"Implies(Eq(SrcPt, 137), Eq(DstIpAddr, 1) & Eq(DstPt, 137) & Eq(Flags, 0) & Eq(Proto, 1) & Eq(SrcIpAddr, 0))"
+]
+},
+{
+"description": "If source port is 138, then destination is broadcast, destination port is 138, flags are 'noflags', protocol is UDP, and source is private.",
+"queries": [
+"Implies(Eq(SrcPt, 138), Eq(DstIpAddr, 1) & Eq(DstPt, 138) & Eq(Flags, 0) & Eq(Proto, 1) & Eq(SrcIpAddr, 0))"
+]
+},
+{
+"description": "If source port is 67, then destination port is 68, flags are 'noflags', protocol is UDP, and source is private.",
+"queries": [
+"Implies(Eq(SrcPt, 67), Eq(DstPt, 68) & Eq(Flags, 0) & Eq(Proto, 1) & Eq(SrcIpAddr, 0))"
+]
+},
+{
+"description": "If source port is 68, then destination port is 67, flags are 'noflags', and protocol is UDP.",
+"queries": [
+"Implies(Eq(SrcPt, 68), Eq(DstPt, 67) & Eq(Flags, 0) & Eq(Proto, 1))"
+]
+},
+{
+"queries": ["Implies(Eq(SrcIpAddr, 3), Ne(DstIpAddr, 3))"],
+"description": "If the source IP address is public, then the destination IP should not also be public (to avoid classifying Internet-to-Internet traffic)."
+},
+{
+"queries": ["Implies(Eq(Proto, 0), Ne(SrcPt, 0))"],
+"description": "If the protocol is TCP, the source port must not be 0 (which is invalid for TCP)."
+},
+{
+"queries": ["Implies(Eq(Proto, 1), Ne(Flags, 1))"],
+"description": "If the protocol is UDP, the flags field must not indicate the presence of TCP flags."
+},
+{
+"queries": ["Implies(Eq(Flags, 1), Eq(Proto, 0))"],
+"description": "If TCP flags are present, then the protocol must be TCP."
+},
+{
+"queries": ["Implies(Eq(DstIpAddr, 4), Eq(SrcIpAddr, 0))"],
+"description": "If the destination IP address is a DNS server, then the source IP must be internal."
+},
+{
+"queries": ["Implies(Eq(Proto, 0), 42*Packets <= Bytes)"],
+"description": "For TCP, the total byte count must be at least 42 bytes per packet (minimum Ethernet frame with TCP/IP)."
+},
+{
+"queries": ["Implies(Eq(Proto, 1), 8*Packets <= Bytes)"],
+"description": "For UDP, the total byte count must be at least 8 bytes per packet (minimum UDP header)."
+},
+{
+"queries": ["Implies(Eq(Proto, 1), 1500*Packets >= Bytes)"],
+"description": "For UDP, the total bytes must not exceed typical Ethernet MTU (1500 bytes per packet)."
+},
+{
+"queries": ["Implies(Eq(SrcPt, 67), Eq(DstPt, 68))"],
+"description": "If the source port is 67 (DHCP server), then the destination port must be 68 (DHCP client)."
+},
+{
+"queries": ["Implies(Eq(DstPt, 123), Eq(Proto, 1))"],
+"description": "If the destination port is 123 (NTP), the protocol must be UDP."
+},
+{
+"queries": ["Implies(Eq(DstPt, 22), Eq(Proto, 0))"],
+"description": "If the destination port is 22 (SSH), the protocol must be TCP."
+},
+{
+"queries": ["Implies(Eq(DstPt, 25), Eq(Proto, 0))"],
+"description": "If the destination port is 25 (SMTP), the protocol must be TCP."
+},
+{
+"queries": ["Implies(Eq(Proto, 1), 42*Packets <= Bytes)"],
+"description": "For UDP, the total bytes must be at least 42 per packet (minimum Ethernet + IP + UDP)."
+},
+{
+"queries": ["Implies(Eq(Proto, 1), 65535*Packets >= Bytes)"],
+"description": "For UDP, the byte count must not exceed the maximum IP packet size per packet (65535 bytes)."
+},
+{
+"queries": ["Implies(Eq(DstPt, 993), Eq(Proto, 0))"],
+"description": "If the destination port is 993 (IMAPS), the protocol must be TCP."
+},
+{
+"queries": ["Implies(Eq(DstIpAddr, 1), Eq(Proto, 1))"],
+"description": "If the destination IP is a broadcast address, the protocol must be UDP (e.g., DHCP, NetBIOS)."
+}
+]

@@ -29,9 +29,15 @@ def theory() -> Theory:
     # modelpath = 'rules/new/hmine_cidds_all.pl'
     # modelpath = 'xgb_cidds_1000000_1feat.pl'
     # modelpath = 'lgbm_cidds_1000.pl'
-    modelpath = 'dt_cidds_10000.pl'
-    modelpath = 'rules/new/dt_cidds_all.pl'
-    modelpath = 'rules/new/xgb_cidds_all.pl'
+    # modelpath = 'dt_cidds_10000.pl'
+    modelpath = 'dt_cidds_all.pl'
+    modelpath = 'xgb_cidds_all.pl'
+    modelpath = 'lgbm_cidds_all.pl'
+    # modelpath = 'rules/new/dt_cidds_10000.pl'
+    # modelpath = 'rules/new/lgbm_cidds_all.pl'
+    # modelpath = 'rules/new/dt_cidds_all.pl'
+    # modelpath = 'rules/new/dt_cidds_all_old.pl'
+    # modelpath = 'rules/new/xgb_cidds_all.pl'
     # modelpath = 'rules/cidds/new/learned_cidds_8192_filtered.pl'
     # modelpath = 'rules/cidds/new/learned_cidds_8192_checked.pl'
     return Theory(modelpath)
@@ -42,6 +48,8 @@ def test_cidds(cases: List[Dict[str, str]], theory: Theory) -> None:
     total_queries = 0
     total_cases = len(cases)
     coverage = 0
+    passed = []
+    failed = []
     for i, q in enumerate(cases):
         cases = q['queries']
         nqueries = len(cases)
@@ -55,15 +63,20 @@ def test_cidds(cases: List[Dict[str, str]], theory: Theory) -> None:
             if result == ProofResult.ENTAILMENT:
                 new_successes += 1
             else:
-                print(f"Failed Test #{i+1}:")
+                print(f"❌ Failed Test #{i+1}:")
                 pprint(f"\t{result}")
-                pprint("\tQuery: ", query)
                 print(f"\tMeaning: {q['description']}")
+                pprint("\tQuery: ", query)
         if new_successes == nqueries:
-            print(f"Passed Test #{i+1}", end='\r')
+            print(f"✅ Passed Test #{i+1}")
+            print(f"\t{q['description']}")
             coverage += 1
+            passed.append(i)
         else:
-            pass
+            failed.append(i)
         successes += new_successes
 
+    print(f"\nRules: {theory.path_to_constraints}")
+    pprint(f"Passed {len(passed)} tests: {passed}")
+    pprint(f"Failed {len(failed)} tests: {failed}")
     print(f"Coverage={coverage/total_cases:.3f}, Recall={successes/total_queries:.3f}")
