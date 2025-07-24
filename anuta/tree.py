@@ -45,11 +45,11 @@ def get_featuregroups(df: pd.DataFrame, feature_marker: str='') -> Dict[str, Lis
         # # max_nfeatures = min(len(features), FLAGS.config.TREE_ARITY_LIMIT)
         combo_size = FLAGS.config.MAX_COMBO_SIZE
         if combo_size < 0:
-            combo_size = len(features)
+            combo_size = len(features) - 1
         #* In any case, include the full feature set.
         featuregroups[target].append(features)   
         nskiped = 0
-        for n in range(1, combo_size):
+        for n in range(1, combo_size+1):
             _featuregroup = [list(combo) for combo in itertools.combinations(features, n)]
             featuregroup = []
             for combo in _featuregroup:
