@@ -1,0 +1,173 @@
+[
+	{
+		"queries": [
+			"FwdPacketLengthMean <= FwdPacketLengthMax",
+            "BwdPacketLengthMean <= BwdPacketLengthMax"
+		],
+		"description": "Mean packet length is less than or equal to max packet length."
+	},
+    {
+        "queries": [
+            "FwdPacketLengthMean >= FwdPacketLengthMin",
+            "BwdPacketLengthMean >= BwdPacketLengthMin"
+        ],
+        "description": "Mean packet length is greater than or equal to min packet length."
+    },
+	{
+        "queries": [
+            "FwdPacketLengthStd <= FwdPacketLengthMax",
+            "BwdPacketLengthStd <= BwdPacketLengthMax"
+        ],
+        "description": "Standard deviation of packet length is less than or equal to max packet length."
+    },
+    {
+        "queries": [
+            "FlowIatMean <= FlowIatMax"
+        ],
+        "description": "Mean flow inter-arrival time is less than or equal to max flow inter-arrival time."
+    },
+    {
+        "queries": [
+            "FlowIatMin <= FlowIatMean"
+        ],
+        "description": "Min flow inter-arrival time is less than or equal to mean flow inter-arrival time."
+    },
+    {
+        "queries": [
+            "(UrgFlagCount>0) >> (Protocol!=17)"
+        ],
+        "description": "If the flow has Urgent Flag, then the Protocol is not UDP."
+    },
+    {
+        "queries": [
+            "(FinFlagCount>0) >> (Protocol!=17)"
+        ],
+        "description": "If the flow has Finish Flag, then the Protocol is not UDP."
+    },
+    {
+        "queries": [
+            "(SynFlagCount>0) >> (Protocol!=17)"
+        ],
+        "description": "If the flow has Synchronize Flag, then the Protocol is not UDP."
+    },
+    {
+        "queries": [
+            "(RstFlagCount>0) >> (Protocol!=17)"
+        ],
+        "description": "If the flow has Reset Flag, then the Protocol is not UDP."
+    },
+    {
+        "queries": [
+            "(PshFlagCount>0) >> (Protocol!=17)"
+        ],
+        "description": "If the flow has Push Flag, then the Protocol is not UDP."
+    },
+    {
+        "queries": [
+            "(AckFlagCount>0) >> (Protocol!=17)"
+        ],
+        "description": "If the flow has Acknowledge Flag, then the Protocol is not UDP."
+    },
+    {
+        "queries": [
+            "(CweFlagCount>0) >> (Protocol!=17)"
+        ],
+        "description": "If the flow has Congestion Window Reduced Flag, then the Protocol is not UDP."
+    },
+    {
+        "queries": [
+            "(EceFlagCount>0) >> (Protocol!=17)"
+        ],
+        "description": "If the flow has ECN-Echo Flag, then the Protocol is not UDP."
+    },
+    {
+        "queries": [
+            "(UrgFlagCount>0) >> (Protocol!=0)"
+        ],
+        "description": "If the flow has Urgent Flag, then the Protocol is not ICMP."
+    },
+    {
+        "queries": [
+            "(FinFlagCount>0) >> (Protocol!=0)"
+        ],
+        "description": "If the flow has Finish Flag, then the Protocol is not ICMP."
+    },
+    {
+        "queries": [
+            "(SynFlagCount>0) >> (Protocol!=0)"
+        ],
+        "description": "If the flow has Synchronize Flag, then the Protocol is not ICMP."
+    },
+    {
+        "queries": [
+            "(RstFlagCount>0) >> (Protocol!=0)"
+        ],
+        "description": "If the flow has Reset Flag, then the Protocol is not ICMP."
+    },
+    {
+        "queries": [
+            "(PshFlagCount>0) >> (Protocol!=0)"
+        ],
+        "description": "If the flow has Push Flag, then the Protocol is not ICMP."
+    },
+    {
+        "queries": [
+            "(AckFlagCount>0) >> (Protocol!=0)"
+        ],
+        "description": "If the flow has Acknowledge Flag, then the Protocol is not ICMP."
+    },
+    {
+        "queries": [
+            "(CweFlagCount>0) >> (Protocol!=0)"
+        ],
+        "description": "If the flow has Congestion Window Reduced Flag, then the Protocol is not ICMP."
+    },
+    {
+        "queries": [
+            "(EceFlagCount>0) >> (Protocol!=0)"
+        ],
+        "description": "If the flow has ECN-Echo Flag, then the Protocol is not ICMP."
+    },
+    {
+        "queries": [
+            "((UrgFlagCount>0) | (FinFlagCount>0) | (SynFlagCount>0) | (RstFlagCount>0) | (PshFlagCount>0) | (AckFlagCount>0) | (CweFlagCount>0) | (EceFlagCount>0)) >> (Protocol!=17)"
+        ],
+        "description": "If the flow has any of the TCP flags, then the Protocol is not UDP or ICMP."
+    },
+    {
+        "queries": [
+            "(SynFlagCount>0) >> (TotalLengthOfFwdPackets>0)"
+        ],
+        "description": "If the flow has Synchronize Flag, then the total length of forward packets is greater than 0."
+    },
+    {
+        "queries": [
+            "(RstFlagCount>0) >> (TotalLengthOfFwdPackets>0)"
+        ],
+        "description": "If the flow has Reset Flag, then the total length of forward packets is greater than 0."
+    },
+    {
+        "queries": [
+            "(CweFlagCount>0) >> (TotalLengthOfFwdPackets>0)"
+        ],
+        "description": "If the flow has Congestion Window Reduced Flag, then the total length of forward packets is greater than 0."
+    },
+    {
+        "queries": [
+            "(EceFlagCount>0) >> (TotalLengthOfFwdPackets>0)"
+        ],
+        "description": "If the flow has ECN-Echo Flag, then the total length of forward packets is greater than 0."
+    },
+    {
+        "queries": [
+            "((SynFlagCount>0) | (RstFlagCount>0) | (CweFlagCount>0) | (EceFlagCount>0)) >> (TotalLengthOfFwdPackets>0)"
+        ],
+        "description": "If the flow has any of the TCP flags, then the total length of forward packets is greater than 0."
+    },
+    {
+        "queries": [
+            "FlowIatStd <= FlowIatMax"
+        ],
+        "description": "*Wrong* constraint: Standard deviation of flow inter-arrival time is less than or equal to max flow inter-arrival time."
+    }
+]

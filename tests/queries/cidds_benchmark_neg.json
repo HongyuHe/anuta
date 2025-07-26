@@ -1,0 +1,80 @@
+[
+{
+"description": "",
+"queries": [
+"Implies(Eq(DstIpAddr, 1), Eq(DstPt, 68))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(DstIpAddr, 3), Ne(DstPt, 22))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(DstIpAddr, 4), Eq(DstPt, 80) | Eq(DstPt, 443) | Eq(DstPt, 8000))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(DstIpAddr, 4), Eq(Proto, 0))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(DstPt, 22), Eq(DstIpAddr, 0) | Eq(DstIpAddr, 1))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(DstPt, 443), Eq(DstIpAddr, 4))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(DstPt, 80), Eq(DstIpAddr, 4))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(Proto, 0), 1500*Packets >= Bytes)"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(Proto, 2), Eq(DstPt, 8))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(SrcIpAddr, 0), Eq(DstPt, 67) | Eq(DstPt, 68))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(SrcIpAddr, 2), Eq(SrcPt, 0))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(SrcIpAddr, 3), Eq(DstIpAddr, 4))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(SrcPt, 22), Eq(SrcIpAddr, 0))"
+]
+}
+]
