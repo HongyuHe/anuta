@@ -46,6 +46,7 @@ def get_featuregroups(df: pd.DataFrame, feature_marker: str='') -> Dict[str, Lis
         combo_size = FLAGS.config.MAX_COMBO_SIZE
         if combo_size < 0:
             combo_size = len(features) - 1
+        log.info(f"Max combo size for {target} is {combo_size}.")
         #* In any case, include the full feature set.
         featuregroups[target].append(features)   
         nskiped = 0
@@ -62,7 +63,7 @@ def get_featuregroups(df: pd.DataFrame, feature_marker: str='') -> Dict[str, Lis
                 else:
                     featuregroup.append(combo)
             featuregroups[target] += featuregroup
-        log.info(f"{target}: Skipped {nskiped} feature groups with single unique value.")
+        # log.info(f"{target}: Skipped {nskiped} feature groups with single unique value.")
     return featuregroups
 
 class TreeLearner(object):
@@ -551,7 +552,7 @@ class XgboostTreeLearner(TreeLearner):
         for target, pathconditions in self.extract_conditions_from_treepaths().items():
             targetvar = target
             rules = set()
-            for targetcls, conditions in pathconditions.items():
+            for i, (targetcls, conditions) in enumerate(pathconditions.items()):
                 for record in conditions:
                     var_conditions = {}
                     for condition in record['conditions']:
@@ -565,9 +566,26 @@ class XgboostTreeLearner(TreeLearner):
                             var_conditions[varname][op] = values | set(varval)
                         elif op == '≥':
                             value = var_conditions[varname].get(op, float('-inf'))
+                            # if value != float('-inf') and value < 0:
+                            #     #! Ignore such conditions? How does this happen?
+                            #     log.error(
+                            #         f"Invalid value for {varname} with {op}: {value}")
+                            #     #! Export an image of the tree to debug
+                            #     from xgboost import to_graphviz
+                            #     xgbmodel = self.trees[target][i]
+                            #     dot = to_graphviz(xgbmodel, tree_idx=0)
+                            #     dot.render("xgb_tree", format="png", cleanup=True) 
                             var_conditions[varname][op] = max(value, varval)
                         elif op == '<':
                             value = var_conditions[varname].get(op, float('+inf'))
+                            # if value < 0:
+                            #     log.error(
+                            #         f"Invalid value for {varname} with {op}: {value}")
+                            #     #! Export an image of the tree to debug
+                            #     from xgboost import to_graphviz
+                            #     xgbmodel = self.trees[target][i]
+                            #     dot = to_graphviz(xgbmodel, tree_idx=0)
+                            #     dot.render("xgb_tree", format="png", cleanup=True)
                             var_conditions[varname][op] = min(value, varval)
 
                     predicates = []
@@ -610,7 +628,15 @@ class XgboostTreeLearner(TreeLearner):
                             assert set(['<', '≥']) & operators, f"{varname} has no recognizd {merged_conditions=}"
                             valmin = merged_conditions.get('≥', float('-inf'))
                             valmax = merged_conditions.get('<', float('+inf'))
-                            assert valmin <= valmax, f"[Conflicting condition!!!]: {varname=}:{merged_conditions}"
+                            # assert valmin <= valmax, f"[Conflicting condition!!!]: {varname=}:{merged_conditions}"
+                            if valmin > valmax:
+                                log.error(
+                                    f"[Conflicting condition!!!]: {varname=}:{merged_conditions}")
+                                #! Export an image of the tree to debug
+                                from xgboost import to_graphviz
+                                xgbmodel = self.trees[target][i]
+                                dot = to_graphviz(xgbmodel, tree_idx=0)
+                                dot.render("xgb_tree_conflict", format="png", cleanup=True)
                             if valmin > float('-inf'):
                                 valmin = math.floor(valmin) if self.dtypes[varname] == 'int' else valmin
                                 predicates.append(f"({varname} >= {valmin})")
@@ -689,9 +715,17 @@ class XgboostTreeLearner(TreeLearner):
                         if split['NodeID'] in useless_splits: continue
 
                         varname = split['Feature']
+                        condition = None
                         if split['Split'] is not None:
-                            op = '<' if split['Direction']=='Yes' else '≥'
-                            condition = f"{varname}${op}${split['Split']}"
+                            if int(split['Split']) < 0:
+                                #* -2147483648 is reserved to represent integer NA in R (xgb.DMatrix), 
+                                #*  assuming non-negative values.
+                                assert int(split['Split']) == -2147483648, \
+                                    f"Unexpected split value {split['Split']} for {varname}."
+                                # log.warning(f"Encountered NA split (-2147483648) for {varname}.")
+                            else:
+                                op = '<' if split['Direction']=='Yes' else '≥'
+                                condition = f"{varname}${op}${split['Split']}"
                         else:
                             assert split['Category'] is not None
                             op = '∈' if split['Direction'] == 'Yes' else '∉'
@@ -701,7 +735,8 @@ class XgboostTreeLearner(TreeLearner):
                                 for v in split['Category']
                             ]
                             condition = f"{varname}${op}${categories}"
-                        conditions.append(condition)
+                        if condition is not None:
+                            conditions.append(condition)
 
                     if conditions:
                         pathcondition['conditions'] = conditions

@@ -17,9 +17,9 @@ from anuta.known import *
 
 class ProofResult(Enum):
     ENTAILMENT = "Entailed"
-    CONTRADICATION = "Contradiction"
-    CONTINGENCY = "Contingency"
-    UNRESOLVED = "Undetermined"
+    CONTRADICTION = "Contradicted"
+    CONTINGENCY = "Contingent/Related"
+    UNRESOLVED = "Unresolved/Unknown"
 
 class Constraint(object):
     #^ Can't inherit from sympy.Expr as it causes AttributeError on newly defined attributes.
@@ -141,7 +141,7 @@ class Theory(object):
             sat = all(sats)
             
             if not sat:
-                result = ProofResult.CONTRADICATION
+                result = ProofResult.CONTRADICTION
                 if verbose:
                     pprint("Counterexample found:")
                     pprint(sat)
@@ -180,7 +180,7 @@ class Theory(object):
             r = s.check()
             if r == z3.unsat:
                 #* If the query is unsatisfiable, then it is a contradiction.
-                result = ProofResult.CONTRADICATION
+                result = ProofResult.CONTRADICTION
                 # if verbose:
                 #     pprint("Counterexample found:")
                 #     pprint(s.model())
@@ -281,6 +281,10 @@ class Theory(object):
         ]
         z3clauses = [z3.simplify(rule) for rule in z3rules]
         z3theory = z3.And(z3clauses)
+        s = z3.Solver()
+        s.add(z3theory)
+        if s.check() != z3.sat:
+            log.warning("Created theory is inconsistent (unsat), check the constraints.")
         return z3theory
     
     @staticmethod
