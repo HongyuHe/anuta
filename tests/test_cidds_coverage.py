@@ -4,23 +4,15 @@ import pytest
 from tqdm import tqdm
 from rich import print as pprint
 
-from anuta.theory import Theory
-from tests.common import get_coverage, get_specificity
+from anuta.theory import Theory, ProofResult
+from tests.common import get_coverage
 
 
 @pytest.fixture
-def possitive_cases() -> List[Dict[str, str]]:
+def cases() -> List[Dict[str, str]]:
     """Fixture to load the queries from the JSON file."""
     # path = "tests/queries/cidds_queries.json"
     path = "tests/queries/cidds_benchmark.json"
-    with open(path, 'r') as f:
-        return json.load(f)
-
-@pytest.fixture
-def negative_cases() -> List[Dict[str, str]]:
-    """Fixture to load the queries from the JSON file."""
-    # path = "tests/queries/cidds_queries.json"
-    path = "tests/queries/cidds_benchmark_neg.json"
     with open(path, 'r') as f:
         return json.load(f)
 
@@ -43,29 +35,13 @@ def theory() -> Theory:
     # modelpath = 'xgb_cidds_all.pl'
     # modelpath = 'lgbm_cidds_all.pl'
     # modelpath = 'rules/new/dt_cidds_10000.pl'
-    modelpath = 'rules/new/lgbm_cidds_all.pl'
+    # modelpath = 'rules/new/lgbm_cidds_all.pl'
     # modelpath = 'rules/new/dt_cidds_all.pl'
     # modelpath = 'rules/new/dt_cidds_all_old.pl'
     # modelpath = 'rules/new/xgb_cidds_all.pl'
     # modelpath = 'rules/cidds/new/learned_cidds_8192_filtered.pl'
-    # modelpath = 'rules/cidds/new/learned_cidds_8192_checked.pl'
+    modelpath = 'rules/cidds/new/learned_cidds_8192_checked.pl'
     return Theory(modelpath)
 
-def test_cidds(
-    possitive_cases: List[Dict[str, str]], 
-    negative_cases: List[Dict[str, str]], 
-    theory: Theory) -> None:
-    
-    tp_count, fn_count, coverage, coverage_detailed = get_coverage(possitive_cases, theory)
-    tn_count, fp_count, specificity, specificity_detailed = get_specificity(negative_cases, theory)
-    accuracy = (tp_count + tn_count) / (tp_count + fn_count + tn_count + fp_count)
-    
-    print("\n\033[1;32m" + "=" * 40)
-    print("🔍 Evaluation Results")
-    print("=" * 40 + "\033[0m")
-
-    print(f"\033[1m🛡️ Coverage:\033[0m     {coverage:.3f}")
-    print(f"\033[1m🎯 Specificity:\033[0m  {specificity:.3f}")
-    print(f"\033[1m✅ Accuracy:\033[0m     {accuracy:.3f} ({tp_count+tn_count}/{tp_count+fn_count+tn_count+fp_count})")
-
-    print("\033[1;32m" + "=" * 40 + "\033[0m\n")
+def test_cidds(cases: List[Dict[str, str]], theory: Theory) -> None:
+    get_coverage(cases, theory)
