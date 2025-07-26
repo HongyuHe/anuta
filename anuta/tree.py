@@ -55,13 +55,13 @@ def get_featuregroups(df: pd.DataFrame, feature_marker: str='') -> Dict[str, Lis
             featuregroup = []
             for combo in _featuregroup:
                 # if df[combo].drop_duplicates().shape[0] == 1:
-                if len(set(map(tuple, df[combo].itertuples(index=False, name=None)))) == 1:
-                    # Only include feature groups with more than one unique value
-                    # log.info(f"Skipping {combo=} with only one unique value.")
-                    nskiped += 1
-                    continue
-                else:
-                    featuregroup.append(combo)
+                # if len(set(map(tuple, df[combo].itertuples(index=False, name=None)))) == 1:
+                #     # Only include feature groups with more than one unique value
+                #     # log.info(f"Skipping {combo=} with only one unique value.")
+                #     nskiped += 1
+                #     continue
+                # else:
+                featuregroup.append(combo)
             featuregroups[target] += featuregroup
         # log.info(f"{target}: Skipped {nskiped} feature groups with single unique value.")
     return featuregroups
