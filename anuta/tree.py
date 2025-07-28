@@ -55,7 +55,6 @@ def get_featuregroups(df: pd.DataFrame, feature_marker: str='') -> Dict[str, Lis
             featuregroup = []
             for combo in _featuregroup:
                 # if df[combo].drop_duplicates().shape[0] == 1:
-                # if len(set(map(tuple, df[combo].itertuples(index=False, name=None)))) == 1:
                 #     # Only include feature groups with more than one unique value
                 #     # log.info(f"Skipping {combo=} with only one unique value.")
                 #     nskiped += 1
@@ -117,7 +116,7 @@ class EntropyTreeLearner(TreeLearner):
             ntrees=1,                 # Build only one tree
             max_depth=len(self.features),
             min_rows=1,               # Minimum number of observations in a leaf
-            min_split_improvement=FLAGS.config.MIN_SPLIT_GAIN,
+            min_split_improvement=0, #* Maximize over-fitting for categorical variables
             sample_rate=1.0,          # Use all rows
             mtries=-2,                # Use all features (set to -2 for all features)
             seed=42,                  # For reproducibility
@@ -127,7 +126,7 @@ class EntropyTreeLearner(TreeLearner):
             # model_id="reg_tree",
             ntrees=1,                 # Build only one tree
             max_depth=len(self.features)//2, #TODO: To be tuned
-            # min_rows=2,             ##* Minimum number of observations for a leaf to split
+            min_rows=100,             #TODO: To be tuned (default value 10 from H2O)
             min_split_improvement=FLAGS.config.MIN_SPLIT_GAIN,
             sample_rate=1.0,          # Use all rows
             mtries=-2,                # Use all features (set to -2 for all features)
@@ -173,7 +172,7 @@ class EntropyTreeLearner(TreeLearner):
                     treeid += 1
                 except Exception as e:
                     #* H2O lib is not very robust and can fail with various errors ...
-                    log.error(f"Failed to train tree for {target} with features {features}: {e}")
+                    log.error(f"Failed to train tree for {target} with features {features}: \n{e}")
                     self.trees[target].append(None)
                     # exit(1)
                 print(f"... Trained {treeid}/{self.total_treegroups} ({treeid/self.total_treegroups:.1%}) tree groups ({target=}).", end='\r')
@@ -224,7 +223,7 @@ class EntropyTreeLearner(TreeLearner):
                     
                     #* Group by leaf and compute min/max of the target variable
                     leaf_stats = hf_leaf.group_by(leaf_col).min(target).max(target).get_frame()
-                    leaf_stats.set_names(['leaf_id', 'leaf_min', 'leaf_max'])
+                    # leaf_stats.set_names(['leaf_id', 'leaf_min', 'leaf_max'])
                     leaf_stats_df = leaf_stats.as_data_frame(use_multi_thread=True)
                     leaf_id_col = leaf_stats_df.columns[0]      
                     min_col = leaf_stats_df.columns[1]          
@@ -339,8 +338,13 @@ class EntropyTreeLearner(TreeLearner):
                     else:
                         targetmin = ruleset[premise]['min']
                         targetmax = ruleset[premise]['max']
-                        conclusion = f"(({target}>={targetmin}) & ({target}<={targetmax}))"\
-                            if targetmin != targetmax else f"Eq({target}, {targetmin})"
+                        if targetmin == targetmax:
+                            #* Too strict condition, skip it
+                            # log.warning(
+                            #     f"Skipping overly strict rule for {target} (min==max: {targetmin}).")
+                            continue
+                        conclusion = f"(({target}>={targetmin}) & ({target}<={targetmax}))"
+                        # \ if targetmin != targetmax else f"Eq({target}, {targetmin})"
                     
                     rule = f"({premise}) >> {conclusion}"
                     rules.add(rule)
@@ -419,16 +423,22 @@ class EntropyTreeLearner(TreeLearner):
             #* Multi-class classification tree
             for targetcls in tree_classes:
                 #! Assume always use one tree (`tree_number=0`) with RF
-                htree = H2OTree(model=dtree, tree_number=0, tree_class=targetcls)
                 paths = []
-                recurse(htree.root_node, [], "", targetcls)
+                try:
+                    htree = H2OTree(model=dtree, tree_number=0, tree_class=targetcls)
+                    recurse(htree.root_node, [], "", targetcls)
+                except Exception as e:
+                    log.error(f"Failed to extract paths ({target=} {targetcls=} {dtree._parms=})\n{e}")
                 if paths:
                     treepaths[targetcls] = paths
         else:
             #* Binomial or regression tree
-            htree = H2OTree(model=dtree, tree_number=0)
             paths = []
-            recurse(htree.root_node, [], "", 0)
+            try:
+                htree = H2OTree(model=dtree, tree_number=0)
+                recurse(htree.root_node, [], "", 0)
+            except Exception as e:
+                log.error(f"Failed to extract paths ({target=} {dtree._parms=})\n{e}")
             if paths:
                 treepaths[0] = paths
         
@@ -442,10 +452,10 @@ class XgboostTreeLearner(TreeLearner):
         super().__init__(constructor, limit)
         
         common_config = dict(
-                min_child_weight=0,    # small → allows fine splits
-                gamma=0,               # allow all positive-gain splits
+                min_child_weight=0,    # Leaf's minimum sum of Hessian
+                gamma=FLAGS.config.MIN_SPLIT_GAIN,
                 grow_policy='depthwise',  # ensures full-depth growth
-                # # tree_method='exact',   # for most deterministic behavior
+                # tree_method='exact',   # for most deterministic behavior
                 # # subsample=1,
                 # # colsample_bytree=1,
                 learning_rate=1,        # set high so pure leaves dominate logits
@@ -653,6 +663,12 @@ class XgboostTreeLearner(TreeLearner):
                             targetmax = record['target_range']['max']
                             if self.dtypes[targetvar] == 'int':
                                 targetmin, targetmax = math.floor(targetmin), math.ceil(targetmax)
+                            if targetmin == targetmax:
+                                #* Too strict condition, skip it
+                                # log.warning(
+                                #     f"Skipping overly strict rule for {targetvar} (min==max: {targetmin}).")
+                                continue
+                            
                             conclusion = f"(({targetvar}>={targetmin}) & ({targetvar}<={targetmax}))"
                         rule = f"({premise}) >> {conclusion}"
                         rules.add(rule)
@@ -663,7 +679,6 @@ class XgboostTreeLearner(TreeLearner):
 
     def extract_conditions_from_treepaths(self) -> Dict[str, Dict[str, List[Dict[str, Any]]]]:
         #TODO: Move to config
-        MIN_GAIN = 0
         MIN_LOGIT = 0
         #* {target: {label1: [conditions1, conditions2, ...], label2: [...]}}
         all_pathconditions: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
@@ -711,7 +726,7 @@ class XgboostTreeLearner(TreeLearner):
                     }
                     conditions = []
                     for split in path['Path']:
-                        if split['Gain'] <= FLAGS.config.MIN_SPLIT_GAIN: continue
+                        # if split['Gain'] <= FLAGS.config.MIN_SPLIT_GAIN: continue
                         if split['NodeID'] in useless_splits: continue
 
                         varname = split['Feature']
@@ -877,7 +892,7 @@ class LightGbmTreeLearner(TreeLearner):
             'feature_fraction_bynode': 1.0,  # use all features in each node
             # 'min_data_in_leaf': 1,        # allow small leaves
             # 'min_sum_hessian_in_leaf': 1e-10,  # loosen constraints
-            'min_gain_to_split': FLAGS.config.MIN_SPLIT_GAIN,
+            'min_split_gain': FLAGS.config.MIN_SPLIT_GAIN,
             'boosting_type': 'gbdt',
             'force_col_wise': True,        # deterministic feature ordering
             # 'categorical_feature': 'auto', # f"name:{','.join(self.categoricals)}",  
@@ -886,6 +901,7 @@ class LightGbmTreeLearner(TreeLearner):
         self.model_configs['classification'] = dict(
             objective='multiclass',
             metric='multi_logloss',
+            min_data_in_leaf=1,  # Minimum # of examples that must fall into a tree node for it to be added.
             max_depth=len(self.features), # high enough to split until pure
             **common_config,
         )
@@ -1064,6 +1080,12 @@ class LightGbmTreeLearner(TreeLearner):
                             targetmax = record['target_range']['max']
                             if self.dtypes[targetvar] == 'int':
                                 targetmin, targetmax = math.floor(targetmin), math.ceil(targetmax)
+                            if targetmin == targetmax:
+                                #* Too strict condition, skip it
+                                # log.warning(
+                                #     f"Skipping overly strict rule for {targetvar} (min==max: {targetmin}).")
+                                continue    
+                            
                             conclusion = f"(({targetvar}>={targetmin}) & ({targetvar}<={targetmax}))"
                         rule = f"({premise}) >> {conclusion}"
                         rules.add(rule)

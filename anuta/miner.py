@@ -41,7 +41,11 @@ def validate(
             #     #* This constraint has already been violated.
             #     continue
             #* Evaluate the constraint with the given assignments
-            sat = rule.subs(assignments)
+            if isinstance(rule, bool):
+                #* If the rule is a boolean, it is already evaluated.
+                sat = rule
+            else:
+                sat = rule.subs(assignments)
             try:
                 if not sat:
                     rule_violations[k] += 1

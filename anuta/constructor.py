@@ -230,7 +230,8 @@ class Netflix(Constructor):
 
         # Step 2: Sort by normalized 5-tuple and frame_time_epoch
         df_sorted = df.sort_values(
-            by=["flow_ip_1", "flow_ip_2", "flow_port_1", "flow_port_2", "flow_proto", "frame_time_epoch"]
+            by=["flow_ip_1", "flow_ip_2", "flow_port_1", "flow_port_2", "flow_proto", 
+                "frame_time_epoch", "frame_number"]
         )
 
         # Step 3: Group by normalized 5-tuple
