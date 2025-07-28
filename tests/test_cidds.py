@@ -5,7 +5,7 @@ from tqdm import tqdm
 from rich import print as pprint
 
 from anuta.theory import Theory
-from tests.common import get_coverage, get_specificity
+from tests.common import get_coverage, get_specificity, run_evaluation
 
 
 @pytest.fixture
@@ -32,18 +32,18 @@ def theory() -> Theory:
     # modelpath = 'rules/cidds/nodc/learned_256.pl'
     # # modelpath = 'results/cidds/dc/learned_4096_checked.pl'
     # # modelpath = 'learned_cidds_128.pl'
-    # # modelpath = 'dtnum_hmine.pl'
-    # # modelpath = 'dtree_cidds_10000.pl'
-    # modelpath = 'fpgrowth_cidds_10000.pl'
-    # modelpath = 'rules/new/hmine_cidds_all.pl'
     # modelpath = 'xgb_cidds_1000000_1feat.pl'
-    # modelpath = 'lgbm_cidds_1000.pl'
-    # modelpath = 'dt_cidds_10000.pl'
+    # modelpath = 'lgbm_cidds_100000.pl'
+    # modelpath = 'xgb_cidds_1000.pl'
+    # modelpath = 'dt_cidds_1000.pl'
+    modelpath = 'dt_cidds_10000.pl'
     # modelpath = 'dt_cidds_all.pl'
     # modelpath = 'xgb_cidds_all.pl'
     # modelpath = 'lgbm_cidds_all.pl'
+    # modelpath = 'rules/new/hmine_cidds_all.pl'
+    # modelpath = 'rules/new/fpgrowth_cidds_all.pl'
     # modelpath = 'rules/new/dt_cidds_10000.pl'
-    modelpath = 'rules/new/lgbm_cidds_all.pl'
+    # modelpath = 'rules/new/lgbm_cidds_all.pl'
     # modelpath = 'rules/new/dt_cidds_all.pl'
     # modelpath = 'rules/new/dt_cidds_all_old.pl'
     # modelpath = 'rules/new/xgb_cidds_all.pl'
@@ -56,16 +56,4 @@ def test_cidds(
     negative_cases: List[Dict[str, str]], 
     theory: Theory) -> None:
     
-    tp_count, fn_count, coverage, coverage_detailed = get_coverage(possitive_cases, theory)
-    tn_count, fp_count, specificity, specificity_detailed = get_specificity(negative_cases, theory)
-    accuracy = (tp_count + tn_count) / (tp_count + fn_count + tn_count + fp_count)
-    
-    print("\n\033[1;32m" + "=" * 40)
-    print("🔍 Evaluation Results")
-    print("=" * 40 + "\033[0m")
-
-    print(f"\033[1m🛡️ Coverage:\033[0m     {coverage:.3f}")
-    print(f"\033[1m🎯 Specificity:\033[0m  {specificity:.3f}")
-    print(f"\033[1m✅ Accuracy:\033[0m     {accuracy:.3f} ({tp_count+tn_count}/{tp_count+fn_count+tn_count+fp_count})")
-
-    print("\033[1;32m" + "=" * 40 + "\033[0m\n")
+    run_evaluation(possitive_cases, negative_cases, theory)

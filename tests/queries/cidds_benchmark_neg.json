@@ -76,5 +76,383 @@
 "queries": [
 "Implies(Eq(SrcPt, 22), Eq(SrcIpAddr, 0))"
 ]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(DstIpAddr, 0) & Eq(DstPt, 123), Eq(DstIpAddr, 4))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(DstIpAddr, 0) & Eq(DstPt, 67), Eq(DstIpAddr, 1) & Eq(DstPt, 67) & Eq(Flags, 0) & Eq(Proto, 1) & Eq(SrcPt, 68))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(DstIpAddr, 0) & Eq(DstPt, 67), Eq(DstIpAddr, 4))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(DstIpAddr, 0) & Eq(Proto, 2) & Eq(SrcIpAddr, 0), Eq(DstIpAddr, 3) & Eq(Flags, 0) & Eq(Proto, 3) & Eq(SrcIpAddr, 0) & Eq(SrcPt, 0))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(DstIpAddr, 0) & Eq(Proto, 2) & Eq(SrcIpAddr, 0), Eq(Flags, 0) & Eq(Proto, 1) & Eq(SrcPt, 123))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(DstIpAddr, 0) & Eq(Proto, 2) & Eq(SrcIpAddr, 0), Ne(SrcPt, 0))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(DstIpAddr, 0) & Eq(SrcIpAddr, 0) & Eq(SrcPt, 0), Eq(DstPt, 123) & Eq(Flags, 0) & Eq(Proto, 1))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(DstIpAddr, 0) & Eq(SrcPt, 0), Eq(DstIpAddr, 1) & Eq(DstPt, 67) & Eq(Flags, 0) & Eq(Proto, 1) & Eq(SrcPt, 68))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(DstIpAddr, 0) & Eq(SrcPt, 0), Eq(DstIpAddr, 1) & Eq(Flags, 0) & Eq(Proto, 1) & Eq(SrcIpAddr, 0) & Eq(SrcPt, 137))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(DstIpAddr, 0) & Eq(SrcPt, 0), Eq(DstIpAddr, 1))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(DstIpAddr, 0) & Eq(SrcPt, 0), Eq(DstIpAddr, 3) & Eq(Flags, 0) & Eq(Proto, 2) & Eq(SrcIpAddr, 0) & Eq(SrcPt, 0))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(DstIpAddr, 3), Eq(Flags, 0) & Eq(Proto, 1))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(DstIpAddr, 4), Eq(DstIpAddr, 3) & Eq(Flags, 0) & Eq(Proto, 2) & Eq(SrcIpAddr, 0) & Eq(SrcPt, 0))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(DstIpAddr, 4), Eq(DstPt, 3) & Eq(Proto, 2))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(DstPt, 0), Eq(DstIpAddr, 0) & Eq(Flags, 0) & Eq(Proto, 2) & Eq(SrcIpAddr, 3) & Eq(SrcPt, 0))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(DstPt, 123) & Eq(SrcIpAddr, 0), Eq(DstIpAddr, 0))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(DstPt, 123) & Eq(SrcIpAddr, 0), Eq(DstIpAddr, 1))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(DstPt, 123) & Eq(SrcIpAddr, 0), Eq(DstIpAddr, 3) & Eq(Flags, 0) & Eq(Proto, 2) & Eq(SrcIpAddr, 0) & Eq(SrcPt, 0))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(DstPt, 123), Eq(DstIpAddr, 3) & Eq(Flags, 0) & Eq(Proto, 2) & Eq(SrcIpAddr, 0) & Eq(SrcPt, 0))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(DstPt, 123), Eq(SrcIpAddr, 0) | Eq(SrcIpAddr, 2))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(DstPt, 123), Ne(DstIpAddr, 3))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(DstPt, 137) | Eq(DstPt, 138), Eq(Proto, 2))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(DstPt, 137), Eq(Proto, 0))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(DstPt, 22), Eq(DstIpAddr, 1) & Eq(DstPt, 137) & Eq(Flags, 0) & Eq(Proto, 1) & Eq(SrcIpAddr, 0))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(DstPt, 22), Eq(DstPt, 68))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(DstPt, 25), Eq(DstIpAddr, 0) & Eq(Flags, 0) & Eq(Proto, 2) & Eq(SrcIpAddr, 3) & Eq(SrcPt, 0))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(DstPt, 25), Eq(DstPt, 3))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(DstPt, 25), Eq(Flags, 0) & Eq(Proto, 1) & Eq(SrcIpAddr, 0) & Eq(SrcPt, 67))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(DstPt, 3), Eq(DstIpAddr, 3))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(DstPt, 3), Eq(SrcIpAddr, 0) | Eq(SrcIpAddr, 2))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(DstPt, 53) & Eq(Flags, 0), Eq(DstIpAddr, 1) & Eq(Flags, 0) & Eq(Proto, 1) & Eq(SrcIpAddr, 0) & Eq(SrcPt, 137))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(DstPt, 53) & Eq(Flags, 0), Eq(DstIpAddr, 3))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(DstPt, 53), Eq(DstIpAddr, 1) & Eq(DstPt, 67) & Eq(Flags, 0) & Eq(Proto, 1) & Eq(SrcPt, 68))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(DstPt, 67), Eq(DstIpAddr, 1) & Eq(Flags, 0) & Eq(Proto, 1) & Eq(SrcIpAddr, 0) & Eq(SrcPt, 137))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(DstPt, 67), Eq(DstIpAddr, 1) & Eq(SrcIpAddr, 0))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(DstPt, 68), Eq(Flags, 1))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(DstPt, 8), Eq(DstIpAddr, 0) & Eq(Flags, 0) & Eq(Proto, 2) & Eq(SrcIpAddr, 3) & Eq(SrcPt, 0))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(DstPt, 8), Eq(DstIpAddr, 0) | Eq(DstIpAddr, 1))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(DstPt, 993), Eq(Flags, 0) & Eq(Proto, 1) & Eq(SrcIpAddr, 0) & Eq(SrcPt, 67))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(Flags, 0) & Eq(SrcIpAddr, 4), Eq(DstPt, 68))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(Flags, 0) & Eq(SrcPt, 53), Eq(DstIpAddr, 3) & Eq(Flags, 0) & Eq(Proto, 2) & Eq(SrcIpAddr, 0) & Eq(SrcPt, 0))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(Flags, 1), Eq(DstIpAddr, 0) | Eq(DstIpAddr, 1))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(Flags, 1), Eq(DstIpAddr, 1) & Eq(DstPt, 137) & Eq(Flags, 0) & Eq(Proto, 1) & Eq(SrcIpAddr, 0))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(Flags, 1), Eq(DstIpAddr, 1) & Eq(DstPt, 138) & Eq(Flags, 0) & Eq(Proto, 1) & Eq(SrcIpAddr, 0))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(Flags, 1), Eq(Proto, 2))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(Proto, 0), Eq(DstIpAddr, 0) & Eq(Flags, 0) & Eq(Proto, 2) & Eq(SrcIpAddr, 3) & Eq(SrcPt, 0))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(Proto, 0), Eq(DstPt, 123) & Eq(Flags, 0) & Eq(Proto, 1))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(Proto, 0), Eq(DstPt, 68))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(Proto, 0), Ne(SrcPt, 443))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(Proto, 1), Eq(Proto, 2))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(Proto, 2), Eq(DstIpAddr, 1) & Eq(Flags, 0) & Eq(Proto, 1) & Eq(SrcIpAddr, 0) & Eq(SrcPt, 138))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(Proto, 2), Eq(DstIpAddr, 1) & Eq(SrcIpAddr, 0))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(Proto, 2), Eq(DstIpAddr, 3) & Eq(DstPt, 0) & Eq(Flags, 0) & Eq(SrcIpAddr, 0) & Eq(SrcPt, 0))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(SrcIpAddr, 0) & Eq(SrcPt, 123), Eq(DstIpAddr, 1) & Eq(SrcIpAddr, 0))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(SrcIpAddr, 4), Eq(DstIpAddr, 1) & Eq(Flags, 0) & Eq(Proto, 1) & Eq(SrcIpAddr, 0) & Eq(SrcPt, 138))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(SrcIpAddr, 4), Eq(Proto, 2))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(SrcPt, 0), Eq(DstPt, 68) & Eq(Flags, 0) & Eq(Proto, 1) & Eq(SrcIpAddr, 0))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(SrcPt, 123), Eq(DstPt, 67) & Eq(Flags, 0) & Eq(Proto, 1))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(SrcPt, 443), Eq(DstIpAddr, 0) & Eq(Flags, 0) & Eq(Proto, 2) & Eq(SrcIpAddr, 3) & Eq(SrcPt, 0))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(SrcPt, 443), Eq(DstPt, 3) & Eq(Proto, 2))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(SrcPt, 53), Eq(SrcIpAddr, 3))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(SrcPt, 8080), Eq(DstIpAddr, 1) & Eq(DstPt, 138) & Eq(Flags, 0) & Eq(Proto, 1) & Eq(SrcIpAddr, 0))"
+]
+},
+{
+"description": "",
+"queries": [
+"Implies(Eq(SrcPt, 8080), Eq(DstIpAddr, 1) & Eq(Flags, 0) & Eq(Proto, 1) & Eq(SrcIpAddr, 0) & Eq(SrcPt, 138))"
+]
 }
 ]

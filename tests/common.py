@@ -3,6 +3,31 @@ from rich import print as pprint
 from anuta.theory import Theory, ProofResult
 
 
+def run_evaluation(possitive_cases: List[Dict[str, str]], 
+                     negative_cases: List[Dict[str, str]], 
+                     theory: Theory) -> None:
+    """
+    Run evaluation on the given theory using the provided positive and negative cases.
+    Prints the results of coverage, specificity, and accuracy.
+    Args:
+        possitive_cases (List[Dict[str, str]]): List of positive test cases.
+        negative_cases (List[Dict[str, str]]): List of negative test cases.
+        theory (Theory): The theory to evaluate.
+    """
+    tp_count, fn_count, coverage, coverage_detailed = get_coverage(possitive_cases, theory)
+    tn_count, fp_count, specificity, specificity_detailed = get_specificity(negative_cases, theory)
+    accuracy = (tp_count + tn_count) / (tp_count + fn_count + tn_count + fp_count)
+    
+    print("\n\033[1;32m" + "=" * 60)
+    print(f"🔍 Results for {theory.path_to_constraints}")
+    print("=" * 60 + "\033[0m")
+
+    print(f"\033[1m🛡️\tCoverage:\033[0m     {coverage:.3f}")
+    print(f"\033[1m🎯\tSpecificity:\033[0m  {specificity:.3f}")
+    print(f"\033[1m✅\tAccuracy:\033[0m     {accuracy:.3f} ({tp_count+tn_count}/{tp_count+fn_count+tn_count+fp_count})")
+
+    print("\033[1;32m" + "=" * 60 + "\033[0m\n")
+
 def get_coverage(cases: List[Dict[str, str]], theory: Theory) -> None:
     print("\033[1;34m" + "#" * 60)
     print("TESTING COVERAGE")
