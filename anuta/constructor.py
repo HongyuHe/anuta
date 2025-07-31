@@ -207,7 +207,86 @@ class Cicids2017(Constructor):
                 dc = DomainCounter(count=0, frequency=freq)
                 fcount[cat] |= {key: dc} if type(key) in [int, str] else {key.item(): dc}
         return indexset, fcount
-    
+
+class Mawi(Constructor):
+    def __init__(self, filepath) -> None:
+        super().__init__()
+        self.label = 'mawi'
+        log.info(f"Loading data from {filepath}")
+        self.df = pd.read_csv(filepath)
+        self.df["frame.time_epoch"] = pd.to_datetime(self.df["frame.time_epoch"], unit="s")
+        self.df['tcp.flags'] = self.df['tcp.flags'].fillna(value='0x0').apply(int, base=16)
+        self.df['ip.version'] = self.df['ip.version'].apply(lambda v: int(v) if ',' not in str(v) else int(v.split(',')[0]))
+        self.df = self.df.rename(columns=rename_pcap(self.df.columns))[used_pcap_cols]
+
+        self.df = self.df[self.df.protocol=='TCP'].reset_index(drop=True)
+        self.df['tcp_urgent_pointer'] = self.df['tcp_urgent_pointer'].fillna(value=0).astype(int)
+        self.df['tcp_window_size_scalefactor'] = self.df['tcp_window_size_scalefactor'].fillna(value=1).astype(int)
+        self.df['tcp_window_size_scalefactor'] = self.df['tcp_window_size_scalefactor'].apply(lambda s: s if s > 0 else 1)
+        self.df.dropna(subset=[
+            'tcp_hdr_len',
+            'tcp_len',
+            'tcp_seq',
+            'tcp_ack',
+            'tcp_window_size_value',
+            'tcp_window_size',
+        ], inplace=True)
+        columns_with_nan_mask = self.df.isna().any()
+        log.warning(f"Columns with missing values: {self.df.columns[columns_with_nan_mask].tolist()}")
+        df = self.df
+        # Apply the normalization
+        flow_keys = df.apply(normalize_pcap_5tuple, axis=1)
+        df = pd.concat([df, flow_keys], axis=1)
+        df_sorted = df.sort_values(
+            by=["flow_ip_1", "flow_ip_2", "flow_port_1", "flow_port_2", "flow_proto", "frame_time_epoch", "frame_number"]
+        )
+        df = df_sorted.reset_index(drop=True).drop(columns=flow_keys)
+        df = df.drop(columns=['frame_number', 'frame_time_epoch', 'protocol', 'tsval', 'tsecr'])
+
+        col_to_var = {col: to_big_camelcase(col, sep='_') for col in df.columns}
+        df.rename(columns=col_to_var, inplace=True)
+        #TODO: Map IPs and ports to boolean predicates.
+        ip_map = {ip: i for i, ip in enumerate(set(df.IpSrc.unique()) | set(df.IpDst.unique()))}
+        df['IpSrc'] = df['IpSrc'].apply(lambda x: ip_map[x])
+        df['IpDst'] = df['IpDst'].apply(lambda x: ip_map[x])
+        df = df.astype(int)
+        self.df = generate_sliding_windows(df, stride=1, window=3)
+        
+        variables = list(self.df.columns)
+        self.categoricals = []
+        for name in self.df.columns:
+            if any(keyword in name.lower() for keyword in ('src', 'dst', 'proto', 'flags')):
+                self.categoricals.append(name)
+        print(f"Categorical variables: {self.categoricals}")
+        domains = {}
+        for name in self.df.columns:
+            if name not in self.categoricals:
+                domains[name] = Domain(DomainType.NUMERICAL, 
+                                       Bounds(self.df[name].min().item(), 
+                                              self.df[name].max().item()), 
+                                       None)
+            else:
+                domains[name] = Domain(DomainType.CATEGORICAL, 
+                                       None, 
+                                       self.df[name].unique().tolist())
+        
+        self.constants: dict[str, Constants] = {}
+        for name in self.df.columns:
+            if 'seq' in name.lower():
+                self.constants[name] = Constants(
+                    kind=ConstantType.ADDITION,
+                    values=netflix_seqnum_increaments
+                )
+            if 'len' in name.lower():
+                self.constants[name] = Constants(
+                    kind=ConstantType.LIMIT,
+                    values=netflix_tcplen_limits
+                )
+        self.anuta = Anuta(variables, domains, self.constants)
+        # pprint(self.anuta.variables)
+        # pprint(self.anuta.domains)
+        # pprint(self.anuta.constants)
+        return
 
 class Netflix(Constructor):
     def __init__(self, filepath) -> None:

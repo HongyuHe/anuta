@@ -42,13 +42,13 @@ def get_featuregroups(df: pd.DataFrame, feature_marker: str='') -> Dict[str, Lis
         #     # suppressed.remove(feature)
         #     # featuregroups[target].append(suppressed)
             
-        # # max_nfeatures = min(len(features), FLAGS.config.TREE_ARITY_LIMIT)
-        combo_size = FLAGS.config.MAX_COMBO_SIZE
-        if combo_size < 0:
-            combo_size = len(features) - 1
+        combo_size = min(FLAGS.config.MAX_COMBO_SIZE, len(features) - 1)
         log.info(f"Max combo size for {target} is {combo_size}.")
         #* In any case, include the full feature set.
-        featuregroups[target].append(features)   
+        featuregroups[target].append(features)
+        if combo_size <= 0:
+            # No combinations to generate, skip further processing
+            continue 
         nskiped = 0
         for n in range(1, combo_size+1):
             _featuregroup = [list(combo) for combo in itertools.combinations(features, n)]
@@ -76,7 +76,7 @@ class TreeLearner(object):
             self.num_examples = 'all'
             
         self.dataset = constructor.label
-        supported_datasets = ['cidds', 'yatesbury', 'metadc', 'netflix']
+        supported_datasets = ['cidds', 'yatesbury', 'metadc', 'netflix', 'mawi']
         assert self.dataset in supported_datasets, \
             f"Unsupported dataset: {self.dataset}. Supported datasets: {supported_datasets}."
         self.examples = constructor.df.copy()
@@ -892,7 +892,6 @@ class LightGbmTreeLearner(TreeLearner):
             'feature_fraction_bynode': 1.0,  # use all features in each node
             # 'min_data_in_leaf': 1,        # allow small leaves
             # 'min_sum_hessian_in_leaf': 1e-10,  # loosen constraints
-            'min_split_gain': FLAGS.config.MIN_SPLIT_GAIN,
             'boosting_type': 'gbdt',
             'force_col_wise': True,        # deterministic feature ordering
             # 'categorical_feature': 'auto', # f"name:{','.join(self.categoricals)}",  
@@ -903,12 +902,14 @@ class LightGbmTreeLearner(TreeLearner):
             metric='multi_logloss',
             min_data_in_leaf=1,  # Minimum # of examples that must fall into a tree node for it to be added.
             max_depth=len(self.features), # high enough to split until pure
+            min_split_gain=FLAGS.config.MIN_SPLIT_GAIN,
             **common_config,
         )
         self.model_configs['regression'] = dict(
             objective='regression',
             metric='l2',
             max_depth=len(self.features)//2, #TODO: To be tuned
+            min_split_gain=FLAGS.config.MIN_SPLIT_GAIN,
             **common_config,
         )
         

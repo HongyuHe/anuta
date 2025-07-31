@@ -5,14 +5,22 @@ from tqdm import tqdm
 from rich import print as pprint
 
 from anuta.theory import Theory, ProofResult
-from tests.common import get_coverage
+from tests.common import get_coverage, get_specificity, run_evaluation
 
 
 @pytest.fixture
-def cases() -> List[Dict[str, str]]:
+def possitive_cases() -> List[Dict[str, str]]:
     """Fixture to load the queries from the JSON file."""
     # path = "tests/queries/netflix_queries.json"
     path = "tests/queries/netflix_benchmark.json"
+    with open(path, 'r') as f:
+        return json.load(f)
+
+@pytest.fixture
+def negative_cases() -> List[Dict[str, str]]:
+    """Fixture to load the queries from the JSON file."""
+    # path = "tests/queries/netflix_queries.json"
+    path = "tests/queries/netflix_benchmark_neg.json"
     with open(path, 'r') as f:
         return json.load(f)
 
@@ -25,8 +33,12 @@ def theory() -> Theory:
     
     # modelpath = 'lgbm_netflix_all.pl'
     # modelpath = 'xgb_netflix_all.pl'
-    modelpath = 'dt_netflix_combo2.pl'
+    modelpath = 'dt_netflix_all.pl'
     return Theory(modelpath)
 
-def test_netflix(cases: List[Dict[str, str]], theory: Theory) -> None:
-    get_coverage(cases, theory)
+def test_netflix(
+    possitive_cases: List[Dict[str, str]], 
+    negative_cases: List[Dict[str, str]], 
+    theory: Theory) -> None:
+    
+    run_evaluation(possitive_cases, negative_cases, theory)

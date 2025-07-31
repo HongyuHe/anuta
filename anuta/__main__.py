@@ -15,7 +15,7 @@ import json
 import warnings
 warnings.filterwarnings("ignore")
 
-from anuta.constructor import Constructor, Millisampler, Cidds001, Netflix, Cicids2017, Yatesbury
+from anuta.constructor import Constructor, Millisampler, Cidds001, Netflix, Cicids2017, Yatesbury, Mawi
 from anuta.tree import EntropyTreeLearner, XgboostTreeLearner, LightGbmTreeLearner
 from anuta.association import AsscoriationRuleLearner
 from anuta.theory import Theory
@@ -66,6 +66,8 @@ if __name__ == '__main__':
             constructor = Yatesbury(FLAGS.data)
         case 'metadc':
             constructor = Millisampler(FLAGS.data)
+        case 'mawi':
+            constructor = Mawi(FLAGS.data)
         case _:
             raise ValueError(f"Unknown dataset: {dataset}")
     

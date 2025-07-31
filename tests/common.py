@@ -65,8 +65,8 @@ def get_coverage(cases: List[Dict[str, str]], theory: Theory) -> None:
                 print(f"\tMeaning: {q['description']}")
                 # pprint("\tQuery: ", query)
         if new_successes == nqueries:
-            print(f"✅ Passed Test #{i+1}")
-            print(f"\t{q['description']}")
+            print(f"✅ Passed Test #{i+1}", end='\r')
+            # print(f"\t{q['description']}")
             coverage += 1
             passed.append(i)
         else:
@@ -116,8 +116,8 @@ def get_specificity(cases: List[Dict[str, str]], theory: Theory) -> None:
                 print(f"\tMeaning: {q['description']}")
                 # pprint("\tQuery: ", query)
         if new_successes == nqueries:
-            print(f"✅ Passed Test #{i+1}")
-            print(f"\t{q['description']}")
+            print(f"✅ Passed Test #{i+1}", end='\r')
+            # print(f"\t{q['description']}")
             specificity += 1
             passed.append(i)
         else:
