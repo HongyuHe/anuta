@@ -46,7 +46,7 @@ for varname in cidds_floats:
 for varname in metadc_ints:
     z3evalmap[varname] = z3.Int(varname)
 #TODO: Improve this ugly piece
-for varname in ['FrameLen_1','IpLen_1','IpHdrLen_1','IpTtl_1','IpProto_1','IpSrc_1','IpDst_1','TcpSrcport_1','TcpDstport_1','TcpHdrLen_1','TcpLen_1','TcpFlags_1','TcpSeq_1','TcpAck_1','TcpUrgentPointer_1','TcpWindowSizeValue_1','TcpWindowSizeScalefactor_1','TcpWindowSize_1','Tsval_1','Tsecr_1','FrameLen_2','IpLen_2','IpHdrLen_2','IpTtl_2','IpProto_2','IpSrc_2','IpDst_2','TcpSrcport_2','TcpDstport_2','TcpHdrLen_2','TcpLen_2','TcpFlags_2','TcpSeq_2','TcpAck_2','TcpUrgentPointer_2','TcpWindowSizeValue_2','TcpWindowSizeScalefactor_2','TcpWindowSize_2','Tsval_2','Tsecr_2','FrameLen_3','IpLen_3','IpHdrLen_3','IpTtl_3','IpProto_3','IpSrc_3','IpDst_3','TcpSrcport_3','TcpDstport_3','TcpHdrLen_3','TcpLen_3','TcpFlags_3','TcpSeq_3','TcpAck_3','TcpUrgentPointer_3','TcpWindowSizeValue_3','TcpWindowSizeScalefactor_3','TcpWindowSize_3','Tsval_3','Tsecr_3']:
+for varname in ['FrameLen_1', 'IpLen_1', 'IpVersion_1', 'IpHdrLen_1', 'IpTtl_1', 'IpProto_1', 'IpSrc_1', 'IpDst_1', 'TcpSrcport_1', 'TcpDstport_1', 'TcpHdrLen_1', 'TcpLen_1', 'TcpFlags_1', 'TcpSeq_1', 'TcpAck_1', 'TcpUrgentPointer_1', 'TcpWindowSizeValue_1', 'TcpWindowSizeScalefactor_1', 'TcpWindowSize_1', 'Tsval_1', 'Tsecr_1', 'Protocol_1', 'FrameLen_2', 'IpLen_2', 'IpVersion_2', 'IpHdrLen_2', 'IpTtl_2', 'IpProto_2', 'IpSrc_2', 'IpDst_2', 'TcpSrcport_2', 'TcpDstport_2', 'TcpHdrLen_2', 'TcpLen_2', 'TcpFlags_2', 'TcpSeq_2', 'TcpAck_2', 'TcpUrgentPointer_2', 'TcpWindowSizeValue_2', 'TcpWindowSizeScalefactor_2', 'TcpWindowSize_2', 'Tsval_2', 'Tsecr_2', 'Protocol_2', 'FrameLen_3', 'IpLen_3', 'IpVersion_3', 'IpHdrLen_3', 'IpTtl_3', 'IpProto_3', 'IpSrc_3', 'IpDst_3', 'TcpSrcport_3', 'TcpDstport_3', 'TcpHdrLen_3', 'TcpLen_3', 'TcpFlags_3', 'TcpSeq_3', 'TcpAck_3', 'TcpUrgentPointer_3', 'TcpWindowSizeValue_3', 'TcpWindowSizeScalefactor_3', 'TcpWindowSize_3', 'Tsval_3', 'Tsecr_3', 'Protocol_3']:
     z3evalmap[varname] = z3.Int(varname)  #* For Netflix dataset, all variables are integers
 #TODO: Add vars from other datasets
 
@@ -62,6 +62,67 @@ def normalize_pcap_5tuple(row):
         "flow_port_2": port_pair[1],
         "flow_proto": row["ip_proto"]
     })
+
+
+from multiprocessing import Pool, cpu_count
+from itertools import combinations
+import pandas as pd
+
+def _generate_predicate(pair, avars, df, variables, existing_columns):
+    var1, var2 = pair
+    results = []
+    new_cols = {}
+    new_categoricals = []
+
+    def expand(var, variables, df, existing_columns):
+        if "$" in var:
+            v1, op, v2 = var.split('$')
+            name = f"{v1}{op}{v2}"
+            colname = f"Mul({v1},{v2})" if op == '×' else name
+            const = int(v1) if v1 not in variables else None
+            if colname not in existing_columns:
+                if op == '+':
+                    new_cols[colname] = const + df[v2] if const else df[v1] + df[v2]
+                elif op == '×':
+                    new_cols[colname] = const * df[v2] if const else df[v1] * df[v2]
+            return colname, {v1, v2} if const is None else {v2}
+        return var, {var}
+
+    lhs, lhs_vars = expand(var1, variables, df, existing_columns)
+    rhs, rhs_vars = expand(var2, variables, df, existing_columns)
+
+    if lhs_vars & rhs_vars:
+        return results, new_cols, new_categoricals
+
+    # Generate predicates
+    for op, fmt in [("==", "@Eq({},{})@"), (">=", "@({}>={})@")]:
+        predicate = fmt.format(lhs, rhs)
+        new_categoricals.append(predicate)
+        if predicate not in df.columns:
+            new_cols[predicate] = (df[lhs] >= df[rhs]).astype(int) if ">=" in predicate else (df[lhs] == df[rhs]).astype(int)
+        results.append(predicate)
+
+    return results, new_cols, new_categoricals
+
+
+def parallel_predicate_generation(avars, df, variables, num_workers=None):
+    pairs = list(combinations(avars, 2))
+    existing_columns = set(df.columns)
+    num_workers = num_workers or cpu_count()
+
+    with Pool(num_workers) as pool:
+        results = pool.starmap(
+            _generate_predicate,
+            [(pair, avars, df, variables, existing_columns) for pair in pairs]
+        )
+
+    all_preds, all_cols, all_cats = [], {}, []
+    for preds, cols, cats in results:
+        all_preds.extend(preds)
+        all_cols.update(cols)
+        all_cats.extend(cats)
+
+    return all_preds, all_cats, all_cols
 
 def transform_consequent(expression):
     """

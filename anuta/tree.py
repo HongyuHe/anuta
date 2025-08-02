@@ -19,7 +19,7 @@ from sklearn.preprocessing import LabelEncoder
 from anuta.constructor import Constructor, Cidds001
 from anuta.theory import Theory
 from anuta.known import *
-from anuta.utils import log, to_big_camelcase
+from anuta.utils import log, true, false
 from anuta.cli import FLAGS
 
 
@@ -31,6 +31,9 @@ def get_featuregroups(df: pd.DataFrame, feature_marker: str='') -> Dict[str, Lis
     for target in variables:
         if df[target].nunique() <= 1:
             # Skip targets with only one unique value
+            # if '@' in target:
+            #     #* Abstract variable, skip it
+            #     log.info(f"Skipping abstract {target=} with only one unique value.")
             continue
         features = [v for v in variables if v != target and feature_marker in v]
         # for feature in features:
@@ -49,15 +52,18 @@ def get_featuregroups(df: pd.DataFrame, feature_marker: str='') -> Dict[str, Lis
         if combo_size <= 0:
             # No combinations to generate, skip further processing
             continue 
-        nskiped = 0
+        skipped = set()
         for n in range(1, combo_size+1):
             _featuregroup = [list(combo) for combo in itertools.combinations(features, n)]
             featuregroup = []
             for combo in _featuregroup:
-                # if df[combo].drop_duplicates().shape[0] == 1:
-                #     # Only include feature groups with more than one unique value
-                #     # log.info(f"Skipping {combo=} with only one unique value.")
-                #     nskiped += 1
+                if tuple(combo) in skipped:
+                    #* Skip already skipped combinations
+                    continue
+                # if len(combo) < 3 and df[combo].drop_duplicates().shape[0] == 1:
+                #     #* h2o will fail to train a tree on a feature group with single unique value,
+                #     #*  but it's a costly operation to check, so only do it for small feature groups.
+                #     skipped.add(tuple(combo))
                 #     continue
                 # else:
                 featuregroup.append(combo)
@@ -92,6 +98,8 @@ class TreeLearner(object):
         self.featuregroups = get_featuregroups(self.examples, constructor.feature_marker)
         self.total_treegroups = len(self.examples.columns) * \
             len(list(self.featuregroups.values())[0])  # Total number of tree groups to learn
+        
+        self.prior = constructor.anuta.prior_kb
         
     def learn(self):
         raise NotImplementedError("Subclasses should implement this method.")
@@ -134,7 +142,7 @@ class EntropyTreeLearner(TreeLearner):
             categorical_encoding="Enum"  # Native handling of categorical features
         )
         
-        self.domains = {}
+        self.domains: Dict[str, Iterable] = {}
         for varname in self.variables:
             if varname in self.categoricals: 
                 self.domains[varname] = sorted(list(constructor.df[varname].unique()))
@@ -146,7 +154,7 @@ class EntropyTreeLearner(TreeLearner):
         #* dTypes: {'int', 'real', 'enum'(categorical)}
         self.dtypes = {varname: t for varname, t in self.examples.types.items()}
         self.trees: Dict[str, List[H2ORandomForestEstimator]] = defaultdict(list)
-        self.learned_rules: Set[str] = set()
+        self.learned_rules: Set[str] = set(self.prior)  # Start with prior rules
         # # pprint(self.domains)
         pprint(self.dtypes)
     
@@ -172,7 +180,7 @@ class EntropyTreeLearner(TreeLearner):
                     treeid += 1
                 except Exception as e:
                     #* H2O lib is not very robust and can fail with various errors ...
-                    log.error(f"Failed to train tree for {target} with features {features}: \n{e}")
+                    log.error(f"Failed to train tree for {target} with features {features}.")
                     self.trees[target].append(None)
                     # exit(1)
                 print(f"... Trained {treeid}/{self.total_treegroups} ({treeid/self.total_treegroups:.1%}) tree groups ({target=}).", end='\r')
@@ -187,7 +195,12 @@ class EntropyTreeLearner(TreeLearner):
         
         assumptions = set()
         for varname, domain in self.domains.items():
-            if varname in self.categoricals:
+            if '@' in varname:
+                #* Abstract variable/predicate, assume it is binary
+                # varname = varname.replace('@', '')
+                # assumptions.add(f"Eq({varname}, true) | Eq({varname}, false)")
+                pass
+            elif varname in self.categoricals:
                 assumptions.add(f"{varname} >= 0")
                 assumptions.add(f"{varname} <= {max(domain)}")
             else:
@@ -196,15 +209,15 @@ class EntropyTreeLearner(TreeLearner):
         
         rules = self.learned_rules | assumptions
         sprules = [sp.sympify(rule) for rule in rules]
+        sprules = list(filter(lambda r: r not in (true, false), sprules))
+        log.info(f"Total rules saved: {len(sprules)}")
         Theory.save_constraints(sprules, f'dt_{self.dataset}_{self.num_examples}.pl')
-        
-        #TODO: Interpret rules with domains to enable `X [opt] s•Y` rules.
         return
         
     def extract_rules_from_treepaths(self) -> Set[str]:
         learned_rules = set()
         for target, all_treepaths in self.extract_paths_from_all_trees().items():
-            total_rules = 0
+            num_target_rules = 0
             for treeidx, pathconditions in enumerate(all_treepaths):
                 if not pathconditions: 
                     #* No valid paths found in this tree
@@ -283,7 +296,15 @@ class EntropyTreeLearner(TreeLearner):
                                 
                                 predicate = ''
                                 for val in invals:
-                                    predicate += f"Eq({varname}, {val})|"
+                                    if '@' in varname:
+                                        avarname = varname.replace('@', '')
+                                        assert val in [0, 1], f"Abstract variable {varname} isn't binary."
+                                        if val == 1:
+                                            predicate += f"{avarname}|"
+                                        else:
+                                            predicate += f"Not({avarname})|"
+                                    else:
+                                        predicate += f"Eq({varname}, {val})|"
                                 predicate = predicate[:-1]
                                 if len(invals) > 1:
                                     predicate = '( ' + predicate + ' )'
@@ -291,7 +312,15 @@ class EntropyTreeLearner(TreeLearner):
                                     predicates.append(predicate)
                     
                                 for val in outvals:
-                                    predicates.append(f"Ne({varname}, {val})")
+                                    if '@' in varname:
+                                        avarname = varname.replace('@', '')
+                                        assert val in [0, 1], f"Abstract variable {varname} isn't binary."
+                                        if val == 1:
+                                            predicates.append(f"Not({avarname})")
+                                        else:
+                                            predicates.append(f"{avarname}")
+                                    else:
+                                        predicates.append(f"Ne({varname}, {val})")
                             else:
                                 assert set(['≤', '>']) & operators, f"{varname} has no recognizd {conditions=}"
                                 valmin = conditions.get('>', float('-inf'))
@@ -300,17 +329,27 @@ class EntropyTreeLearner(TreeLearner):
                                     #TODO: Accumulate logits to decide which condition to take. Discard all together for now.
                                     print(f"[Conflicting condition!!!]: {varname=}:{conditions}")
                                 if valmin == valmax:
-                                    predicates.append(f"Eq({varname}, {valmin})")
-                                else:
-                                    if valmin > float('-inf'):
-                                        predicates.append(f"({varname} > {valmin})")
-                                    if valmax < float('+inf'):
+                                    # predicates.append(f"Eq({varname}, {valmin})")
+                                    # log.warning(
+                                    #     f"Skipping overly strict rule for {target} ({varname}={valmin}).")
+                                    continue
+                                if valmin > float('-inf'):
+                                    predicates.append(f"({varname} > {valmin})")
+                                if valmax < float('+inf'):
                                         predicates.append(f"({varname} <= {valmax})")
 
                         if predicates:
                             premise = ' & '.join(predicates)
+                            assert '@' not in premise, \
+                                f"Premise {premise} contains abstract variables."
                             if target in self.categoricals:
-                                conclusion = f"Eq({target}, {targetcls})"
+                                if '@' in target:
+                                    #* Abstract variable
+                                    atarget = target.replace('@', '')
+                                    assert targetcls in [0, 1], f"Abstract {target=} isn't binary."
+                                    conclusion = f"{atarget}" if targetcls == 1 else f"Not({atarget})"
+                                else:
+                                    conclusion = f"Eq({target}, {targetcls})"
                                 ruleset[premise].add(conclusion)
                             else:
                                 leafid = record['pathid'] # record['pathid'].split('-')[1]
@@ -348,9 +387,9 @@ class EntropyTreeLearner(TreeLearner):
                     
                     rule = f"({premise}) >> {conclusion}"
                     rules.add(rule)
-                total_rules += len(rules)
+                num_target_rules += len(rules)
                 learned_rules |= rules
-            log.info(f"Extracted {len(rules)} rules from trees of {target}.")
+            log.info(f"Extracted {num_target_rules} rules from trees of {target}.")
         log.info(f"Total rules extracted: {len(learned_rules)}")
         return learned_rules
     
@@ -647,6 +686,10 @@ class XgboostTreeLearner(TreeLearner):
                                 xgbmodel = self.trees[target][i]
                                 dot = to_graphviz(xgbmodel, tree_idx=0)
                                 dot.render("xgb_tree_conflict", format="png", cleanup=True)
+                            if valmin == valmax:
+                                log.warning(
+                                    f"Skipping overly strict rule for {target} ({varname}={valmin}).")
+                                continue
                             if valmin > float('-inf'):
                                 valmin = math.floor(valmin) if self.dtypes[varname] == 'int' else valmin
                                 predicates.append(f"({varname} >= {valmin})")
@@ -1065,6 +1108,11 @@ class LightGbmTreeLearner(TreeLearner):
                             valmin = merged_conditions.get('>', float('-inf'))
                             valmax = merged_conditions.get('≤', float('+inf'))
                             assert valmin <= valmax, f"[Conflicting condition!!!]: {varname=}:{merged_conditions}"
+                            
+                            if valmin == valmax:
+                                log.warning(
+                                    f"Skipping overly strict rule for {target} ({varname}={valmin}).")
+                                continue
                             if valmin > float('-inf'):
                                 valmin = math.floor(valmin) if self.dtypes[varname] == 'int' else valmin
                                 predicates.append(f"({varname} > {valmin})")

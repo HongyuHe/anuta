@@ -7,7 +7,7 @@ import sympy as sp
 import json
 import sys
 
-from anuta.grammar import AnutaMilli, Bounds, Anuta, Domain, DomainType, ConstantType, Constants
+from anuta.grammar import AnutaMilli, Bounds, Anuta, Domain, DomainType, ConstantType, Constants, VariableType
 from anuta.known import *
 from anuta.utils import *
 from anuta.cli import FLAGS
@@ -61,7 +61,7 @@ class Constructor(object):
     def __init__(self) -> None:
         self.label: str = None
         self.df: pd.DataFrame = None
-        self.anuta: AnutaMilli | Anuta = None
+        self.anuta: Anuta = None
         self.categoricals: list[str] = []
         self.feature_marker = ''
     
@@ -70,6 +70,205 @@ class Constructor(object):
             domains: dict[str, Domain],
         ) -> tuple[dict[str, dict[str, np.ndarray]], dict[str, DomainCounter]]:
         pass
+
+    def build_abstract_domain(
+        self, typed_variables: Dict[VariableType, List[str]],
+        constants: Dict[str, Constants], categoricals: List[str], df: pd.DataFrame
+    ) -> None:
+        adf = df.copy()
+        avars = set()
+        variable_types = {}
+        #* Variables -> their types.
+        for vtype, variables in typed_variables.items():
+            for var in variables:
+                avars.add(var)
+                variable_types[var] = vtype
+        raw_variables = list(avars)
+        
+        for varname, consts in constants.items():
+            if varname in categoricals:
+                #* Only augment numerical variables with constants.
+                continue
+            vtype = variable_types[varname]
+            #& X*c 
+            if consts.kind == ConstantType.SCALAR:
+                for const in consts.values:
+                    if const == 1: continue
+                    avar = f"{const}$×${varname}"
+                    avars.add(avar)
+                    variable_types[avar] = vtype
+            #& X+c
+            if consts.kind == ConstantType.ADDITION:
+                for const in consts.values:
+                    avar = f"{const}$+${varname}"
+                    avars.add(avar)
+                    variable_types[avar] = vtype
+                    
+                #* default: X+1
+                avar = f"1$+${varname}"
+                avars.add(avar)
+                variable_types[avar] = vtype
+            #& X>c    
+            if consts.kind == ConstantType.LIMIT:
+                #* Trees are good at this, so we don't augment these variables.
+                pass
+            
+        #& All pairs of X*Y and X+Y
+        numericals = typed_variables[VariableType.SIZE]
+        for i, var1 in enumerate(numericals):
+            for var2 in numericals[i+1:]:
+                if var1 == var2: continue
+                avar = f"{var1}$×${var2}"
+                avars.add(avar)
+                variable_types[avar] = VariableType.SIZE
+                avar = f"{var1}$+${var2}"
+                avars.add(avar)
+                variable_types[avar] = VariableType.SIZE
+                
+        numericals = typed_variables[VariableType.COUNT]
+        for i, var1 in enumerate(numericals):
+            for var2 in numericals[i+1:]:
+                if var1 == var2: continue
+                avar = f"{var1}$×${var2}"
+                avars.add(avar)
+                variable_types[avar] = VariableType.COUNT
+                avar = f"{var1}$+${var2}"
+                avars.add(avar)
+                variable_types[avar] = VariableType.COUNT
+        
+        
+        # pprint(avars)
+        log.info(f"Created {len(avars)-len(raw_variables)} abstract vars.")
+        
+        #& Generate augmented predicates
+        #& All pairs of A==B for A, B in avars
+        # new_vars.add('0')
+        skipped = set()
+        avars = list(avars)
+        abstract_predicates = set()
+        prior_rules = set()
+        for i, var1 in enumerate(avars):
+            vtype1 = variable_types[var1]
+            for var2 in avars[i+1:]:
+                vtype2 = variable_types[var2]
+                if var1 == var2: continue
+                if vtype1 != vtype2:
+                    #* Don't generate predicates with different variable types.
+                    continue
+                
+                lhs_vars = set()
+                rhs_vars = set()
+                
+                if "$" not in var1:
+                    lhs = var1
+                    lhs_vars.add(lhs)
+                else:
+                    #* Recover values and operators
+                    v1, op1, v2 = var1.split('$')
+                    lhs = f"({v1}{op1}{v2})"
+                    lhs_vars.add(v2)
+                    if op1 == '×':
+                        lhs = f"Mul({v1},{v2})"
+                        
+                    const = None
+                    if v1 not in raw_variables:
+                        #* v1 is a constant
+                        const = int(v1)
+                    else:
+                        lhs_vars.add(v1)
+                    
+                    if lhs not in adf.columns:
+                        if op1 == '+':
+                            adf[lhs] = const+adf[v2] if const else adf[v1]+adf[v2]
+                        elif op1 == '×':
+                            adf[lhs] = const*adf[v2] if const else adf[v1]*adf[v2]
+                    # if adf[lhs].nunique() <= 1:
+                    #     #* Skip abstract variables with only one unique value.
+                    #     skipped.add(lhs)
+                    #     #! This's a very strong assumption.
+                    #     # log.info(f"Skipping abstract {lhs=} with only one unique value.")
+                    #     continue                    
+                    
+                if "$" not in var2:
+                    rhs = var2
+                    rhs_vars.add(rhs)
+                else:
+                    v1, op2, v2 = var2.split('$')
+                    rhs = f"({v1}{op2}{v2})"
+                    rhs_vars.add(v2)
+                    if op2 == '×':
+                        rhs = f"Mul({v1},{v2})"
+                    
+                    const = None
+                    if v1 not in raw_variables:
+                        #* v1 is a constant
+                        const = int(v1)
+                    else:
+                        rhs_vars.add(v1)
+                    
+                    if rhs not in adf.columns:
+                        if op2 == '+':
+                            adf[rhs] = const+adf[v2] if const else adf[v1]+adf[v2]
+                        elif op2 == '×':
+                            adf[rhs] = const*adf[v2] if const else adf[v1]*adf[v2]
+                    # if adf[rhs].nunique() <= 1:
+                    #     #* Skip abstract variables with only one unique value.
+                    #     skipped.add(rhs)
+                    #     # log.info(f"Skipping abstract {rhs=} with only one unique value.")
+                    #     continue
+                
+                if lhs_vars & rhs_vars:
+                    #* Don't generate predicates with overlapping variables.
+                    continue
+                #& Equality predicates: Eq(A,B)
+                predicate = f"@Eq({lhs},{rhs})@"
+                if predicate not in adf.columns:
+                    adf[predicate] = (adf[lhs] == adf[rhs]).astype(int)
+                else:
+                    log.warning(f"Duplicated {predicate=}.")
+                #* Check uniqueness -> add as priors
+                if adf[predicate].nunique() > 1:
+                    abstract_predicates.add(predicate)
+                    categoricals.append(predicate)
+                else:
+                    #* Add as prior rule given its unique value.
+                    if adf[predicate].iloc[0] == 0:
+                        predicate = f"Ne({lhs},{rhs})"
+                    else:
+                        predicate = predicate.replace('@', '')
+                    prior_rules.add(predicate)
+                
+                if vtype1 == VariableType.COUNT:
+                    #& Comparison predicates: A>B
+                    predicate = f"@({lhs}>{rhs})@"
+                    if predicate not in adf.columns:
+                        adf[predicate] = (adf[lhs] > adf[rhs]).astype(int)
+                    else:
+                        log.warning(f"Duplicated {predicate=}.")
+                    if adf[predicate].nunique() > 1:
+                        abstract_predicates.add(predicate)
+                        categoricals.append(predicate)
+                    else:
+                        if adf[predicate].iloc[0] == 0:
+                            predicate = f"Not({predicate})"
+                        else:
+                            predicate = predicate.replace('@', '')
+                        prior_rules.add(predicate)
+                    # if '+' not in lhs:
+                    #     new_vars.add(f"@({lhs} > 0)")
+                    # if '+' not in rhs:
+                    #     new_vars.add(f"@({rhs} > 0)")
+            log.info(f"{i+1}/{len(avars)} avars: {len(abstract_predicates)=}, {len(prior_rules)=}")
+            
+        # print(abstract_predicates)
+        # print(f"{new_vars=}")
+        assert not (abstract_predicates & set(raw_variables)), f"Abstract variables overlap with existing variables."
+        new_variables = list(abstract_predicates) + raw_variables
+        # pprint(adf[augmented_vars].head(5))
+        print(f"{len(abstract_predicates)=}")
+        # print(f"{len(new_variables)=}")
+        
+        return new_variables, categoricals, adf[new_variables], prior_rules
 
 class Yatesbury(Constructor):
     def __init__(self, filepath) -> None:
@@ -258,17 +457,24 @@ class Mawi(Constructor):
             if any(keyword in name.lower() for keyword in ('src', 'dst', 'proto', 'flags')):
                 self.categoricals.append(name)
         print(f"Categorical variables: {self.categoricals}")
-        domains = {}
+        
+        #TODO: Move to known.py
+        typed_variables: Dict[VariableType, List[str]] = defaultdict(list)
         for name in self.df.columns:
-            if name not in self.categoricals:
-                domains[name] = Domain(DomainType.NUMERICAL, 
-                                       Bounds(self.df[name].min().item(), 
-                                              self.df[name].max().item()), 
-                                       None)
+            if any(keyword in name.lower() for keyword in ('src', 'dst', 'port')):
+                typed_variables[VariableType.ID].append(name)
+            elif any(keyword in name.lower() for keyword in ('len', 'size', 'window')):
+                typed_variables[VariableType.SIZE].append(name)
+            elif any(keyword in name.lower() for keyword in ('time', 'epoch', 'duration', 'ts')):
+                typed_variables[VariableType.TIME].append(name)
+            elif any(keyword in name.lower() for keyword in ('seq', 'ack', 'ttl')):
+                typed_variables[VariableType.COUNT].append(name)
+            elif any(keyword in name.lower() for keyword in ('proto', 'flags', 'pointer', 'version')):
+                typed_variables[VariableType.CLASS].append(name)
             else:
-                domains[name] = Domain(DomainType.CATEGORICAL, 
-                                       None, 
-                                       self.df[name].unique().tolist())
+                raise ValueError(f"Unknown variable type for {name}.")
+        # pprint(typed_variables)
+            
         
         self.constants: dict[str, Constants] = {}
         for name in self.df.columns:
@@ -282,7 +488,25 @@ class Mawi(Constructor):
                     kind=ConstantType.LIMIT,
                     values=netflix_tcplen_limits
                 )
-        self.anuta = Anuta(variables, domains, self.constants)
+
+        variables, self.categoricals, self.df, prior_rules = self.build_abstract_domain(
+            typed_variables, self.constants, self.categoricals, self.df)
+        #* Remove identifiers after adding the predicates.
+        self.df.drop(columns=typed_variables[VariableType.ID], inplace=True)
+        
+        domains = {}
+        for name in self.df.columns:
+            if name not in self.categoricals:
+                domains[name] = Domain(DomainType.NUMERICAL, 
+                                       Bounds(self.df[name].min().item(), 
+                                              self.df[name].max().item()), 
+                                       None)
+            else:
+                domains[name] = Domain(DomainType.CATEGORICAL, 
+                                       None, 
+                                       self.df[name].unique().tolist())
+        #TODO: Add prior rules
+        self.anuta = Anuta(variables, domains, self.constants, prior_kb=prior_rules)
         # pprint(self.anuta.variables)
         # pprint(self.anuta.domains)
         # pprint(self.anuta.constants)
@@ -317,10 +541,10 @@ class Netflix(Constructor):
         grouped = df_sorted.groupby(["flow_ip_1", "flow_ip_2", "flow_port_1", "flow_port_2", "flow_proto"])
 
         for flow_id, flow_df in grouped:
-            log.info(f"Flow {flow_id}: {len(flow_df)} packets")
+            print(f"Flow {flow_id}: {len(flow_df)} packets")
         #! Assuming a single (bidirectional) flow for now.
         self.df = flow_df.drop(columns=flow_keys)
-        todrop = ['frame_number', 'frame_time_epoch']
+        todrop = ['frame_number', 'frame_time_epoch', 'protocol', 'frame_len', 'ip_version']
         for col in todrop:
             if col in self.df.columns:
                 self.df.drop(columns=[col], inplace=True)
@@ -345,18 +569,7 @@ class Netflix(Constructor):
         for name in self.df.columns:
             if any(keyword in name.lower() for keyword in ('src', 'dst', 'proto', 'flags')):
                 self.categoricals.append(name)
-        print(f"Categorical variables: {self.categoricals}")
-        domains = {}
-        for name in self.df.columns:
-            if name not in self.categoricals:
-                domains[name] = Domain(DomainType.NUMERICAL, 
-                                       Bounds(self.df[name].min().item(), 
-                                              self.df[name].max().item()), 
-                                       None)
-            else:
-                domains[name] = Domain(DomainType.CATEGORICAL, 
-                                       None, 
-                                       self.df[name].unique().tolist())
+        # print(f"Categorical variables: {self.categoricals}")
         
         self.constants: dict[str, Constants] = {}
         for name in self.df.columns:
@@ -370,6 +583,22 @@ class Netflix(Constructor):
                     kind=ConstantType.LIMIT,
                     values=netflix_tcplen_limits
                 )
+        variables, self.categoricals, self.df = self.build_abstract_domain(
+            variables, self.constants, self.categoricals, self.df)
+        # self.df.to_csv('netflix_abstracted.csv', index=False)
+        
+        domains = {}
+        for name in self.df.columns:
+            if name not in self.categoricals:
+                domains[name] = Domain(DomainType.NUMERICAL, 
+                                       Bounds(self.df[name].min().item(), 
+                                              self.df[name].max().item()), 
+                                       None)
+            else:
+                domains[name] = Domain(DomainType.CATEGORICAL, 
+                                       None, 
+                                       self.df[name].unique().tolist())
+        
         self.anuta = Anuta(variables, domains, self.constants)
         # pprint(self.anuta.variables)
         # pprint(self.anuta.domains)
@@ -432,20 +661,7 @@ class Cidds001(Constructor):
         self.df['DstPt'] = self.df['DstPt'].apply(cidds_port_map)
         self.categoricals = cidds_categoricals
         
-        domains = {}
-        for name in self.df.columns:
-            if name not in self.categoricals:
-                domains[name] = Domain(DomainType.NUMERICAL, 
-                                      Bounds(self.df[name].min().item(), 
-                                             self.df[name].max().item()), 
-                                      None)
-            else:
-                domains[name] = Domain(DomainType.CATEGORICAL, 
-                                      None, 
-                                      self.df[name].unique())
-        
         #* Add the constants associated with the vars.
-        prior_kb = []
         self.constants: dict[str, Constants] = {}
         for name in variables:
             if 'ip' in name.lower():
@@ -471,16 +687,32 @@ class Cidds001(Constructor):
                     #* Sort the values in ascending order.
                     values=sorted(cidds_constants['bytes'])
                 )
-                
-        self.anuta = Anuta(variables, domains, self.constants, prior_kb)
-        pprint(self.anuta.variables)
-        pprint(self.anuta.domains)
-        pprint(self.anuta.constants)
-        print(f"Prior KB size: {len(self.anuta.prior_kb)}:")
-        print(f"\t{self.anuta.prior_kb}\n")
         
-        # save_constraints(self.anuta.initial_kb + self.anuta.prior_kb, 'initial_constraints_arity3_negexpr')
-        print(f"Initial KB size: {len(self.anuta.initial_kb)}")
+        # variables, self.categoricals, self.df = self.build_abstract_domain(
+        #     variables, self.constants, self.categoricals, self.df)
+                
+        domains = {}
+        for name in self.df.columns:
+            if name not in self.categoricals:
+                domains[name] = Domain(DomainType.NUMERICAL, 
+                                      Bounds(self.df[name].min().item(), 
+                                             self.df[name].max().item()), 
+                                      None)
+            else:
+                domains[name] = Domain(DomainType.CATEGORICAL, 
+                                      None, 
+                                      self.df[name].unique())
+
+        prior_kb = []
+        self.anuta = Anuta(variables, domains, self.constants, prior_kb)
+        # pprint(self.anuta.variables)
+        # pprint(self.anuta.domains)
+        # pprint(self.anuta.constants)
+        # print(f"Prior KB size: {len(self.anuta.prior_kb)}:")
+        # print(f"\t{self.anuta.prior_kb}\n")
+        
+        # # save_constraints(self.anuta.initial_kb + self.anuta.prior_kb, 'initial_constraints_arity3_negexpr')
+        # print(f"Initial KB size: {len(self.anuta.initial_kb)}")
         return
     
     def get_indexset_and_counter(

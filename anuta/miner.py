@@ -72,8 +72,8 @@ def validator(
     nworkers = core_count = psutil.cpu_count() if not FLAGS.cores else FLAGS.cores
     dfpartitions = [df.reset_index(drop=True) for df in np.array_split(constructor.df, core_count)]
     
-    if len(rules) <= core_count:
-        #* Avoid parallel overhead if the number of rules is small.
+    if len(constructor.df) <= core_count:
+        #* Avoid parallel overhead if the number of samples is small.
         nworkers = 1
     
     log.info(f"Spawning {nworkers} workers for validation ...")

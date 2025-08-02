@@ -1,5 +1,6 @@
 from itertools import combinations
 from typing import *
+import pandas as pd
 import sympy as sp
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -15,6 +16,13 @@ from anuta.theory import Constraint
 class Bounds:
     lb: float
     ub: float
+
+class VariableType(Enum):
+    TIME = auto()
+    SIZE = auto()
+    ID = auto()
+    COUNT = auto()
+    CLASS = auto()
 
 class ConstantType(Enum):
     ASSIGNMENT = auto()
@@ -49,7 +57,7 @@ class Operator(Enum):
 class Anuta(object):
     def __init__(self, variables: List[str], domains: Dict[str, Domain], 
                  constants: Dict[str, Constants]=None, 
-                 prior_kb: List[Constraint]=[]):
+                 prior_kb: List[Constraint | str]=[]):
         variables = sp.symbols(' '.join(variables))
         self.variables: Dict[str, sp.Symbol] = {v.name: v for v in variables}
         self.domains: Dict[str, Domain] = domains
