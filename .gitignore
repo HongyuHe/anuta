@@ -1,5 +1,6 @@
 *.DS_Store
 data/Millisampler-data
+*.html
 
 *.json
 data/*.csv

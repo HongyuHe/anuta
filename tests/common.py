@@ -52,20 +52,21 @@ def get_coverage(cases: List[Dict[str, str]], theory: Theory) -> None:
             # result = theory.proves(query, verbose=False)
             # assert entailed, f"Failed Test #{i}"
             if entailment != ProofResult.ENTAILMENT:
-                print(f"❌ Failed Test #{i+1} (Entailment):")
-                pprint(f"\t{entailment=}")
+                # print(f"❌ Failed Test #{i} (Entailment):")
+                # pprint(f"\t{entailment=}")
                 failed_entailments += 1
             if contradiction != ProofResult.CONTRADICTION:
-                print(f"❌ Failed Test #{i+1} (Contradiction):")
-                pprint(f"\t{contradiction=}")
+                # print(f"❌ Failed Test #{i} (Contradiction):")
+                # pprint(f"\t{contradiction=}")
                 failed_contradictions += 1
             if entailment == ProofResult.ENTAILMENT and contradiction == ProofResult.CONTRADICTION:
                 new_successes += 1
             else:
+                print(f"❌ Failed Test #{i}:")
                 print(f"\tMeaning: {q['description']}")
                 # pprint("\tQuery: ", query)
         if new_successes == nqueries:
-            print(f"✅ Passed Test #{i+1}", end='\r')
+            print(f"✅ Passed Test #{i}", end='\r')
             # print(f"\t{q['description']}")
             coverage += 1
             passed.append(i)
@@ -103,20 +104,21 @@ def get_specificity(cases: List[Dict[str, str]], theory: Theory) -> None:
             entailment = theory.z3proves(query, verbose=False)
             contradiction = theory.z3proves(f"Not({query})", verbose=False)
             if entailment == ProofResult.ENTAILMENT:
-                print(f"❌ Failed Test #{i+1} (False Entailment):")
-                pprint(f"\t{entailment=}")
+                # print(f"❌ Failed Test #{i} (False Entailment):")
+                # pprint(f"\t{entailment=}")
                 failed_entailments += 1
             if contradiction == ProofResult.CONTRADICTION:
-                print(f"❌ Failed Test #{i+1} (False Contradiction):")
-                pprint(f"\t{contradiction=}")
+                # print(f"❌ Failed Test #{i} (False Contradiction):")
+                # pprint(f"\t{contradiction=}")
                 failed_contradictions += 1
             if entailment != ProofResult.ENTAILMENT and contradiction != ProofResult.CONTRADICTION:
                 new_successes += 1
             else:
+                print(f"❌ Failed Test #{i}:")
                 print(f"\tMeaning: {q['description']}")
                 # pprint("\tQuery: ", query)
         if new_successes == nqueries:
-            print(f"✅ Passed Test #{i+1}", end='\r')
+            print(f"✅ Passed Test #{i}", end='\r')
             # print(f"\t{q['description']}")
             specificity += 1
             passed.append(i)

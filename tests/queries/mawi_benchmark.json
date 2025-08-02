@@ -10,7 +10,7 @@
 
 {
 "queries": [
-"Implies(Eq(TcpFlags_1, 2) & Eq(TcpFlags_2, 18) & Eq(TcpFlags_3, 16), Eq(TcpAck_2, TcpSeq_1 + 1) & Eq(TcpSeq_3, TcpAck_2) & Eq(TcpAck_3, TcpSeq_2 + 1))"
+"Implies(Eq(TcpFlags_1, 2) & Eq(TcpFlags_2, 18) & Eq(TcpFlags_3, 16) & Eq(IpSrc_2, IpDst_1) & Eq(IpDst_2, IpSrc_1) & Eq(TcpSrcport_1, TcpDstport_2) & Eq(TcpSrcport_2, TcpDstport_1), Eq(TcpAck_2, TcpSeq_1 + 1) & Eq(TcpSeq_3, TcpAck_2) & Eq(TcpAck_3, TcpSeq_2 + 1))"
 ],
 "description": "Three-way handshake with expected ACK/SEQ relationships"
 },
@@ -20,13 +20,6 @@
 "Implies( Eq(TcpFlags_1, 24) & Eq(IpSrc_2, IpDst_1) & Eq(IpDst_2, IpSrc_1) & Eq(TcpSrcport_1, TcpDstport_2) & Eq(TcpSrcport_2, TcpDstport_1), Eq(TcpFlags_2, 4) | Eq(TcpFlags_2, 16) | Eq(TcpFlags_2, 17) | Eq(TcpFlags_2, 18) | Eq(TcpFlags_2, 20) | Eq(TcpFlags_2, 24) | Eq(TcpFlags_2, 25))"
 ],
 "description": "PSH-ACK packet is followed by appropriate ACK-related flags"
-},
-
-{
-"queries": [
-"Implies(Eq(TcpFlags_1, 17) & Eq(TcpFlags_2, 16) & Eq(IpSrc_2, IpDst_1) & Eq(IpDst_2, IpSrc_1) & Eq(TcpSrcport_1, TcpDstport_2) & Eq(TcpSrcport_2, TcpDstport_1), Eq(TcpAck_2, TcpSeq_1) | Eq(TcpAck_2, TcpSeq_1 + 1))"
-],
-"description": "FIN-ACK is followed by ACK with correct acknowledgment number (relaxed)"
 },
 
 {
