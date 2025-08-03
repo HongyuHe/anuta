@@ -1,3 +1,4 @@
+from collections import defaultdict
 from itertools import combinations
 from typing import *
 import pandas as pd
@@ -17,12 +18,12 @@ class Bounds:
     lb: float
     ub: float
 
-class VariableType(Enum):
-    TIME = auto()
-    SIZE = auto()
-    ID = auto()
-    COUNT = auto()
-    CLASS = auto()
+# class VariableType(Enum):
+#     TIME = auto()
+#     SIZE = auto()
+#     ID = auto()
+#     COUNT = auto()
+#     CLASS = auto()
 
 class ConstantType(Enum):
     ASSIGNMENT = auto()
@@ -52,8 +53,84 @@ class Operator(Enum):
     NOP = 0
     PLUS = auto()
     MAX = auto()
-    
-    
+
+class VariableType(Enum):
+    IP = auto()
+    PORT = auto()
+    SEQUENCING = auto()
+    LENGTH = auto()
+    # HEADER_LENGTH = auto()
+    FLAG = auto()
+    POINTER = auto()
+    WINDOW = auto()
+    TIME = auto()
+    PROTO = auto()
+    TTL = auto()
+    UNKNOWN = auto()
+
+
+# Map types to whether they are categorical or numerical
+TYPE_DOMIAN = {
+    VariableType.IP: DomainType.CATEGORICAL,
+    VariableType.PORT: DomainType.CATEGORICAL,
+    VariableType.SEQUENCING: DomainType.NUMERICAL,
+    VariableType.LENGTH: DomainType.NUMERICAL,
+    # VariableType.HEADER_LENGTH: DomainType.NUMERICAL,
+    VariableType.FLAG: DomainType.CATEGORICAL,
+    VariableType.POINTER: DomainType.NUMERICAL,
+    VariableType.WINDOW: DomainType.NUMERICAL,
+    VariableType.TIME: DomainType.NUMERICAL,
+    VariableType.PROTO: DomainType.CATEGORICAL, 
+    VariableType.TTL: DomainType.NUMERICAL,
+    VariableType.UNKNOWN: "unknown"
+}
+
+
+def get_variable_type(name: str) -> VariableType:
+    lname = name.lower()
+
+    if any(k in lname for k in ('ipsrc', 'ipdst')):
+        return VariableType.IP
+    elif any(k in lname for k in ('srcport', 'dstport')):
+        return VariableType.PORT
+    elif any(k in lname for k in ('tcpseq', 'tcpack')):
+        return VariableType.SEQUENCING
+    elif any(k in lname for k in ('tcplen', 'iplen', 'framelen', 'iphdrlen', 'tcphdrlen')):
+        return VariableType.LENGTH
+    elif 'flags' in lname:
+        return VariableType.FLAG
+    elif 'pointer' in lname:
+        return VariableType.POINTER
+    elif 'window' in lname:
+        return VariableType.WINDOW
+    elif any(k in lname for k in ('tsval', 'tsecr', 'time', 'timestamp', 'epoch')):
+        return VariableType.TIME
+    elif any(k in lname for k in ('proto', 'version')):
+        return VariableType.PROTO
+    elif 'ttl' in lname:
+        return VariableType.TTL
+    else:
+        return VariableType.UNKNOWN
+
+
+def type_variables(var_list: List[str]) -> Dict[VariableType, List[str]]:
+    groups = defaultdict(list)
+    for var in var_list:
+        vtype = get_variable_type(var)
+        groups[vtype].append(var)
+    return dict(groups)
+
+
+def group_variables_by_type(var_list: List[str]) -> Tuple[
+    Dict[str, List[str]], Dict[str, List[str]]
+]:
+    typed = type_variables(var_list)
+    grouped = defaultdict(list)
+    for vtype, vars in typed.items():
+        kind = TYPE_DOMIAN[vtype]
+        grouped[kind].extend(vars)
+    return typed, dict(grouped)
+
 class Anuta(object):
     def __init__(self, variables: List[str], domains: Dict[str, Domain], 
                  constants: Dict[str, Constants]=None, 

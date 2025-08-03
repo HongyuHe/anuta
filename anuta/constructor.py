@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from time import perf_counter
 from rich import print as pprint
 from collections import defaultdict
 import pandas as pd
@@ -7,7 +8,9 @@ import sympy as sp
 import json
 import sys
 
-from anuta.grammar import AnutaMilli, Bounds, Anuta, Domain, DomainType, ConstantType, Constants, VariableType
+from anuta.grammar import (
+    Bounds, Anuta, Domain, DomainType, ConstantType, Constants, VariableType, 
+    TYPE_DOMIAN, group_variables_by_type)
 from anuta.known import *
 from anuta.utils import *
 from anuta.cli import FLAGS
@@ -72,19 +75,23 @@ class Constructor(object):
         pass
 
     def build_abstract_domain(
-        self, typed_variables: Dict[VariableType, List[str]],
-        constants: Dict[str, Constants], categoricals: List[str], df: pd.DataFrame
-    ) -> None:
+        self, variables: List[str],
+        constants: Dict[str, Constants], df: pd.DataFrame
+    ) -> tuple[List[str], List[str], Set[str], pd.DataFrame]:
         adf = df.copy()
-        avars = set()
+        avars: Set[str] = set()
         variable_types = {}
+        typed_variables, grouped_variables = group_variables_by_type(self.df.columns)
+        categoricals = [varname for varname, domaintype in grouped_variables.items()
+                        if domaintype == DomainType.CATEGORICAL]
+        
         #* Variables -> their types.
-        for vtype, variables in typed_variables.items():
-            for var in variables:
+        for vtype, tvars in typed_variables.items():
+            for var in tvars:
                 avars.add(var)
                 variable_types[var] = vtype
-        raw_variables = list(avars)
         
+        start = perf_counter()
         for varname, consts in constants.items():
             if varname in categoricals:
                 #* Only augment numerical variables with constants.
@@ -114,39 +121,32 @@ class Constructor(object):
                 pass
             
         #& All pairs of X*Y and X+Y
-        numericals = typed_variables[VariableType.SIZE]
-        for i, var1 in enumerate(numericals):
-            for var2 in numericals[i+1:]:
-                if var1 == var2: continue
-                avar = f"{var1}$×${var2}"
-                avars.add(avar)
-                variable_types[avar] = VariableType.SIZE
-                avar = f"{var1}$+${var2}"
-                avars.add(avar)
-                variable_types[avar] = VariableType.SIZE
-                
-        numericals = typed_variables[VariableType.COUNT]
-        for i, var1 in enumerate(numericals):
-            for var2 in numericals[i+1:]:
-                if var1 == var2: continue
-                avar = f"{var1}$×${var2}"
-                avars.add(avar)
-                variable_types[avar] = VariableType.COUNT
-                avar = f"{var1}$+${var2}"
-                avars.add(avar)
-                variable_types[avar] = VariableType.COUNT
-        
+        for vtype in typed_variables:
+            domaintype = TYPE_DOMIAN[vtype]
+            if domaintype != DomainType.NUMERICAL: 
+                #* Only augment numerical vars.
+                continue
+            
+            numericals = typed_variables[vtype]
+            for i, var1 in enumerate(numericals):
+                for var2 in numericals[i+1:]:
+                    if var1 == var2: continue
+                    avar = f"{var1}$×${var2}"
+                    avars.add(avar)
+                    variable_types[avar] = vtype
+                    avar = f"{var1}$+${var2}"
+                    avars.add(avar)
+                    variable_types[avar] = vtype
         
         # pprint(avars)
-        log.info(f"Created {len(avars)-len(raw_variables)} abstract vars.")
+        log.info(f"Created {len(avars)-len(variables)} abstract vars.")
         
         #& Generate augmented predicates
         #& All pairs of A==B for A, B in avars
         # new_vars.add('0')
-        skipped = set()
-        avars = list(avars)
+        avars: List[str] = list(avars)
         abstract_predicates = set()
-        prior_rules = set()
+        prior_rules: Set[str] = set()
         for i, var1 in enumerate(avars):
             vtype1 = variable_types[var1]
             for var2 in avars[i+1:]:
@@ -171,7 +171,7 @@ class Constructor(object):
                         lhs = f"Mul({v1},{v2})"
                         
                     const = None
-                    if v1 not in raw_variables:
+                    if v1 not in variables:
                         #* v1 is a constant
                         const = int(v1)
                     else:
@@ -200,7 +200,7 @@ class Constructor(object):
                         rhs = f"Mul({v1},{v2})"
                     
                     const = None
-                    if v1 not in raw_variables:
+                    if v1 not in variables:
                         #* v1 is a constant
                         const = int(v1)
                     else:
@@ -223,33 +223,37 @@ class Constructor(object):
                 #& Equality predicates: Eq(A,B)
                 predicate = f"@Eq({lhs},{rhs})@"
                 if predicate not in adf.columns:
-                    adf[predicate] = (adf[lhs] == adf[rhs]).astype(int)
+                    predicate_values = (adf[lhs] == adf[rhs]).astype(int)
                 else:
                     log.warning(f"Duplicated {predicate=}.")
                 #* Check uniqueness -> add as priors
-                if adf[predicate].nunique() > 1:
+                if predicate_values.nunique() > 1:
+                    adf[predicate] = predicate_values
                     abstract_predicates.add(predicate)
                     categoricals.append(predicate)
                 else:
                     #* Add as prior rule given its unique value.
-                    if adf[predicate].iloc[0] == 0:
+                    if predicate_values.iloc[0] == 0:
                         predicate = f"Ne({lhs},{rhs})"
                     else:
                         predicate = predicate.replace('@', '')
                     prior_rules.add(predicate)
                 
-                if vtype1 == VariableType.COUNT:
+                domaintype1 = TYPE_DOMIAN[vtype1]
+                if domaintype1 == DomainType.NUMERICAL:
                     #& Comparison predicates: A>B
                     predicate = f"@({lhs}>{rhs})@"
                     if predicate not in adf.columns:
-                        adf[predicate] = (adf[lhs] > adf[rhs]).astype(int)
+                        predicate_values = (adf[lhs] > adf[rhs]).astype(int)
                     else:
                         log.warning(f"Duplicated {predicate=}.")
-                    if adf[predicate].nunique() > 1:
+                        
+                    if predicate_values.nunique() > 1:
+                        adf[predicate] = predicate_values
                         abstract_predicates.add(predicate)
                         categoricals.append(predicate)
                     else:
-                        if adf[predicate].iloc[0] == 0:
+                        if predicate_values.iloc[0] == 0:
                             predicate = f"Not({predicate})"
                         else:
                             predicate = predicate.replace('@', '')
@@ -258,17 +262,23 @@ class Constructor(object):
                     #     new_vars.add(f"@({lhs} > 0)")
                     # if '+' not in rhs:
                     #     new_vars.add(f"@({rhs} > 0)")
-            log.info(f"{i+1}/{len(avars)} avars: {len(abstract_predicates)=}, {len(prior_rules)=}")
-            
+            print(f"... {i+1}/{len(avars)} avars: {len(abstract_predicates)=}, {len(prior_rules)=}", end='\r')
+        end = perf_counter()
+        log.info(f"Generated {len(abstract_predicates)} abstract predicates in {end-start:.2f} seconds.")
+        log.info(f"Learned {len(prior_rules)} prior rules.")
         # print(abstract_predicates)
         # print(f"{new_vars=}")
-        assert not (abstract_predicates & set(raw_variables)), f"Abstract variables overlap with existing variables."
-        new_variables = list(abstract_predicates) + raw_variables
+        assert not (abstract_predicates & set(variables)), f"Abstract variables overlap with existing variables."
+        new_variables = list(abstract_predicates) + variables
         # pprint(adf[augmented_vars].head(5))
-        print(f"{len(abstract_predicates)=}")
+        # print(f"{len(abstract_predicates)=}")
         # print(f"{len(new_variables)=}")
         
-        return new_variables, categoricals, adf[new_variables], prior_rules
+        adf = adf[new_variables]
+        #* Remove identifiers after generating the predicates.
+        adf.drop(columns=typed_variables[VariableType.IP]+typed_variables[VariableType.PORT], inplace=True)
+        
+        return new_variables, categoricals, prior_rules, adf
 
 class Yatesbury(Constructor):
     def __init__(self, filepath) -> None:
@@ -444,38 +454,42 @@ class Mawi(Constructor):
 
         col_to_var = {col: to_big_camelcase(col, sep='_') for col in df.columns}
         df.rename(columns=col_to_var, inplace=True)
-        #TODO: Map IPs and ports to boolean predicates.
-        ip_map = {ip: i for i, ip in enumerate(set(df.IpSrc.unique()) | set(df.IpDst.unique()))}
+        
+        base_idx = 70_000 #* Prevent collisions with other fields.
+        ip_map = {ip: i+base_idx for i, ip in enumerate(set(df.IpSrc.unique()) | set(df.IpDst.unique()))}
         df['IpSrc'] = df['IpSrc'].apply(lambda x: ip_map[x])
         df['IpDst'] = df['IpDst'].apply(lambda x: ip_map[x])
         df = df.astype(int)
         self.df = generate_sliding_windows(df, stride=1, window=3)
         
         variables = list(self.df.columns)
-        self.categoricals = []
-        for name in self.df.columns:
-            if any(keyword in name.lower() for keyword in ('src', 'dst', 'proto', 'flags')):
-                self.categoricals.append(name)
-        print(f"Categorical variables: {self.categoricals}")
+        # typed_variables, grouped_variables = group_variables_by_type(self.df.columns)
+        # self.categoricals = [varname for varname, domaintype in grouped_variables.items()
+        #                      if domaintype == DomainType.CATEGORICAL]
         
-        #TODO: Move to known.py
-        typed_variables: Dict[VariableType, List[str]] = defaultdict(list)
-        for name in self.df.columns:
-            if any(keyword in name.lower() for keyword in ('src', 'dst', 'port')):
-                typed_variables[VariableType.ID].append(name)
-            elif any(keyword in name.lower() for keyword in ('len', 'size', 'window')):
-                typed_variables[VariableType.SIZE].append(name)
-            elif any(keyword in name.lower() for keyword in ('time', 'epoch', 'duration', 'ts')):
-                typed_variables[VariableType.TIME].append(name)
-            elif any(keyword in name.lower() for keyword in ('seq', 'ack', 'ttl')):
-                typed_variables[VariableType.COUNT].append(name)
-            elif any(keyword in name.lower() for keyword in ('proto', 'flags', 'pointer', 'version')):
-                typed_variables[VariableType.CLASS].append(name)
-            else:
-                raise ValueError(f"Unknown variable type for {name}.")
+        # for name in self.df.columns:
+        #     if any(keyword in name.lower() for keyword in ('src', 'dst', 'proto', 'flags')):
+        #         self.categoricals.append(name)
+        # print(f"Categorical variables: {self.categoricals}")
+        
+        # #TODO: Move to known.py
+        # typed_variables: Dict[VariableType, List[str]] = defaultdict(list)
+        # for name in self.df.columns:
+        #     if any(keyword in name.lower() for keyword in ('src', 'dst', 'port')):
+        #         typed_variables[VariableType.ID].append(name)
+        #     elif any(keyword in name.lower() for keyword in ('len', 'size', 'window')):
+        #         typed_variables[VariableType.SIZE].append(name)
+        #     elif any(keyword in name.lower() for keyword in ('time', 'epoch', 'duration', 'ts')):
+        #         typed_variables[VariableType.TIME].append(name)
+        #     elif any(keyword in name.lower() for keyword in ('seq', 'ack', 'ttl')):
+        #         typed_variables[VariableType.COUNT].append(name)
+        #     elif any(keyword in name.lower() for keyword in ('proto', 'flags', 'pointer', 'version')):
+        #         typed_variables[VariableType.CLASS].append(name)
+        #     else:
+        #         raise ValueError(f"Unknown variable type for {name}.")
         # pprint(typed_variables)
             
-        
+        #TODO: Improve
         self.constants: dict[str, Constants] = {}
         for name in self.df.columns:
             if 'seq' in name.lower():
@@ -489,10 +503,11 @@ class Mawi(Constructor):
                     values=netflix_tcplen_limits
                 )
 
-        variables, self.categoricals, self.df, prior_rules = self.build_abstract_domain(
-            typed_variables, self.constants, self.categoricals, self.df)
-        #* Remove identifiers after adding the predicates.
-        self.df.drop(columns=typed_variables[VariableType.ID], inplace=True)
+        variables, self.categoricals, prior_rules, self.df = self.build_abstract_domain(
+            variables, self.constants, self.df)
+        # #* Remove identifiers after adding the predicates.
+        # self.df.drop(columns=typed_variables[VariableType.IP] + 
+        #              typed_variables[VariableType.PORT], inplace=True)
         
         domains = {}
         for name in self.df.columns:
@@ -583,8 +598,8 @@ class Netflix(Constructor):
                     kind=ConstantType.LIMIT,
                     values=netflix_tcplen_limits
                 )
-        variables, self.categoricals, self.df = self.build_abstract_domain(
-            variables, self.constants, self.categoricals, self.df)
+        # variables, self.categoricals, self.df = self.build_abstract_domain(
+        #     variables, self.constants, self.categoricals, self.df)
         # self.df.to_csv('netflix_abstracted.csv', index=False)
         
         domains = {}

@@ -28,6 +28,7 @@ def get_featuregroups(df: pd.DataFrame, feature_marker: str='') -> Dict[str, Lis
     log.info(f"Generating feature groups with marker '{feature_marker}'")
     featuregroups = defaultdict(list)
     variables = list(df.columns)
+    log.info(f"{FLAGS.config.MAX_COMBO_SIZE=}")
     for target in variables:
         if df[target].nunique() <= 1:
             # Skip targets with only one unique value
@@ -46,7 +47,7 @@ def get_featuregroups(df: pd.DataFrame, feature_marker: str='') -> Dict[str, Lis
         #     # featuregroups[target].append(suppressed)
             
         combo_size = min(FLAGS.config.MAX_COMBO_SIZE, len(features) - 1)
-        log.info(f"Max combo size for {target} is {combo_size}.")
+        # log.info(f"Max combo size for {target} is {combo_size}.")
         #* In any case, include the full feature set.
         featuregroups[target].append(features)
         if combo_size <= 0:
@@ -159,7 +160,8 @@ class EntropyTreeLearner(TreeLearner):
         pprint(self.dtypes)
     
     def learn(self):
-        log.info(f"Learning {self.total_treegroups} groups of trees from {len(self.examples)} examples.")
+        log.info(f"Learning {self.total_treegroups} tree groupts from {len(self.examples)} examples"
+                 f" and {len(self.features)} features ({len(self.categoricals)} categorical vars).")
         
         start = perf_counter()
         treeid = 1
