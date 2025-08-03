@@ -234,11 +234,10 @@ class Constructor(object):
                     abstract_predicates.add(predicate)
                     categoricals.append(predicate)
                 else:
-                    #* Add as prior rule given its unique value.
+                    predicate = predicate.replace('@', '')
+                    #* Invert the predicate if it's always false.
                     if predicate_values.iloc[0] == 0:
                         predicate = f"Ne({lhs},{rhs})"
-                    else:
-                        predicate = predicate.replace('@', '')
                     prior_rules.add(predicate)
                 
                 domaintype1 = TYPE_DOMIAN[vtype1]
@@ -255,10 +254,9 @@ class Constructor(object):
                         abstract_predicates.add(predicate)
                         categoricals.append(predicate)
                     else:
+                        predicate = predicate.replace('@', '')
                         if predicate_values.iloc[0] == 0:
                             predicate = f"Not({predicate})"
-                        else:
-                            predicate = predicate.replace('@', '')
                         prior_rules.add(predicate)
                     # if '+' not in lhs:
                     #     new_vars.add(f"@({lhs} > 0)")
@@ -707,6 +705,7 @@ class Cidds001(Constructor):
                     values=sorted(cidds_constants['bytes'])
                 )
         
+        prior_rules: Set[str] = set()
         variables, self.categoricals, prior_rules, self.df = self.build_abstract_domain(
             variables, self.constants, self.df, drop_identifiers=False)
                 

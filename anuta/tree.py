@@ -190,7 +190,7 @@ class EntropyTreeLearner(TreeLearner):
         log.info(f"Training {self.total_treegroups} tree groups took {end - start:.2f} seconds.")
         
         start = perf_counter()
-        self.learned_rules = self.extract_rules_from_treepaths()
+        self.learned_rules |= self.extract_rules_from_treepaths()
         end = perf_counter()
         log.info(f"Learned {len(self.learned_rules)} rules from {self.total_treegroups} trees.")
         log.info(f"Extracting rules took {end - start:.2f} seconds.")
