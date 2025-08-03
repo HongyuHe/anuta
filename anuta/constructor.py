@@ -84,8 +84,11 @@ class Constructor(object):
         avars: Set[str] = set()
         variable_types = {}
         typed_variables, grouped_variables = group_variables_by_type(self.df.columns)
-        categoricals = [varname for varname, domaintype in grouped_variables.items()
-                        if domaintype == DomainType.CATEGORICAL]
+        # pprint(grouped_variables)
+        categoricals = []
+        for domaintype, varnames in grouped_variables.items():
+            if domaintype == DomainType.CATEGORICAL:
+                categoricals.extend(varnames)
         
         #* Variables -> their types.
         for vtype, tvars in typed_variables.items():
@@ -276,7 +279,13 @@ class Constructor(object):
         
         adf = adf[new_variables]
         if drop_identifiers:
-            adf.drop(columns=typed_variables[VariableType.IP]+typed_variables[VariableType.PORT], inplace=True)
+            identifiers = typed_variables[VariableType.IP]+typed_variables[VariableType.PORT]
+            adf.drop(columns=identifiers, inplace=True)
+            for var in identifiers:
+                if var in new_variables:
+                    new_variables.remove(var)
+                if var in categoricals:
+                    categoricals.remove(var)
         
         return new_variables, categoricals, prior_rules, adf
 
@@ -706,8 +715,8 @@ class Cidds001(Constructor):
                 )
         
         prior_rules: Set[str] = set()
-        variables, self.categoricals, prior_rules, self.df = self.build_abstract_domain(
-            variables, self.constants, self.df, drop_identifiers=False)
+        # variables, self.categoricals, prior_rules, self.df = self.build_abstract_domain(
+        #     variables, self.constants, self.df, drop_identifiers=False)
                 
         domains = {}
         for name in self.df.columns:
