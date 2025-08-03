@@ -601,6 +601,8 @@ class Netflix(Constructor):
         # variables, self.categoricals, self.df = self.build_abstract_domain(
         #     variables, self.constants, self.categoricals, self.df)
         # self.df.to_csv('netflix_abstracted.csv', index=False)
+        variables, self.categoricals, prior_rules, self.df = self.build_abstract_domain(
+            variables, self.constants, self.df)
         
         domains = {}
         for name in self.df.columns:
@@ -614,7 +616,7 @@ class Netflix(Constructor):
                                        None, 
                                        self.df[name].unique().tolist())
         
-        self.anuta = Anuta(variables, domains, self.constants)
+        self.anuta = Anuta(variables, domains, self.constants, prior_kb=prior_rules)
         # pprint(self.anuta.variables)
         # pprint(self.anuta.domains)
         # pprint(self.anuta.constants)

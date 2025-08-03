@@ -160,13 +160,13 @@ class EntropyTreeLearner(TreeLearner):
         pprint(self.dtypes)
     
     def learn(self):
-        log.info(f"Learning {self.total_treegroups} tree groupts from {len(self.examples)} examples"
-                 f" and {len(self.features)} features ({len(self.categoricals)} categorical vars).")
+        log.info(f"{self.__class__.__name__}: Training {self.total_treegroups} tree groups from {len(self.examples)}"
+                 f" examples and {len(self.features)} features ({len(self.categoricals)} categorical vars).")
         
         start = perf_counter()
         treeid = 1
         for target, feature_group in self.featuregroups.items():
-            log.info(f"Learning trees for {target} with {len(feature_group)} feature groups.")
+            log.info(f"{target=}: {len(feature_group)} feature groups.")
             if target in self.categoricals:
                 params = self.model_configs['classification']
             else:
@@ -546,7 +546,8 @@ class XgboostTreeLearner(TreeLearner):
         pprint(self.dtypes)
     
     def learn(self):
-        log.info(f"Learning {self.total_treegroups} groups of trees from {len(self.examples)} examples.")
+        log.info(f"{self.__class__.__name__}: Training {self.total_treegroups} tree groups from {len(self.examples)}"
+                 f" examples and {len(self.features)} features ({len(self.categoricals)} categorical vars).")
         
         start = perf_counter()
         treeid = 1
@@ -987,7 +988,8 @@ class LightGbmTreeLearner(TreeLearner):
         pprint(self.dtypes)
         
     def learn(self):
-        log.info(f"Learning {self.total_treegroups} groups of trees from {len(self.examples)} examples.")
+        log.info(f"{self.__class__.__name__}: Training {self.total_treegroups} tree groups from {len(self.examples)}"
+                 f" examples and {len(self.features)} features ({len(self.categoricals)} categorical vars).")
         
         start = perf_counter()
         treeid = 1
