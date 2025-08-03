@@ -76,7 +76,9 @@ class Constructor(object):
 
     def build_abstract_domain(
         self, variables: List[str],
-        constants: Dict[str, Constants], df: pd.DataFrame
+        constants: Dict[str, Constants], 
+        df: pd.DataFrame,
+        drop_identifiers: bool = True
     ) -> tuple[List[str], List[str], Set[str], pd.DataFrame]:
         adf = df.copy()
         avars: Set[str] = set()
@@ -275,8 +277,8 @@ class Constructor(object):
         # print(f"{len(new_variables)=}")
         
         adf = adf[new_variables]
-        #* Remove identifiers after generating the predicates.
-        adf.drop(columns=typed_variables[VariableType.IP]+typed_variables[VariableType.PORT], inplace=True)
+        if drop_identifiers:
+            adf.drop(columns=typed_variables[VariableType.IP]+typed_variables[VariableType.PORT], inplace=True)
         
         return new_variables, categoricals, prior_rules, adf
 
@@ -705,8 +707,8 @@ class Cidds001(Constructor):
                     values=sorted(cidds_constants['bytes'])
                 )
         
-        # variables, self.categoricals, self.df = self.build_abstract_domain(
-        #     variables, self.constants, self.categoricals, self.df)
+        variables, self.categoricals, prior_rules, self.df = self.build_abstract_domain(
+            variables, self.constants, self.df, drop_identifiers=False)
                 
         domains = {}
         for name in self.df.columns:
@@ -720,8 +722,7 @@ class Cidds001(Constructor):
                                       None, 
                                       self.df[name].unique())
 
-        prior_kb = []
-        self.anuta = Anuta(variables, domains, self.constants, prior_kb)
+        self.anuta = Anuta(variables, domains, self.constants, prior_kb=prior_rules)
         # pprint(self.anuta.variables)
         # pprint(self.anuta.domains)
         # pprint(self.anuta.constants)

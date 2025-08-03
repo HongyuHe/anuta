@@ -58,7 +58,7 @@ class VariableType(Enum):
     IP = auto()
     PORT = auto()
     SEQUENCING = auto()
-    LENGTH = auto()
+    SIZE = auto()
     # HEADER_LENGTH = auto()
     FLAG = auto()
     POINTER = auto()
@@ -74,7 +74,7 @@ TYPE_DOMIAN = {
     VariableType.IP: DomainType.CATEGORICAL,
     VariableType.PORT: DomainType.CATEGORICAL,
     VariableType.SEQUENCING: DomainType.NUMERICAL,
-    VariableType.LENGTH: DomainType.NUMERICAL,
+    VariableType.SIZE: DomainType.NUMERICAL,
     # VariableType.HEADER_LENGTH: DomainType.NUMERICAL,
     VariableType.FLAG: DomainType.CATEGORICAL,
     VariableType.POINTER: DomainType.NUMERICAL,
@@ -89,21 +89,22 @@ TYPE_DOMIAN = {
 def get_variable_type(name: str) -> VariableType:
     lname = name.lower()
 
-    if any(k in lname for k in ('ipsrc', 'ipdst')):
+    if any(k in lname for k in ('ipsrc', 'ipdst', 'ipaddr')):
         return VariableType.IP
-    elif any(k in lname for k in ('srcport', 'dstport')):
+    elif any(k in lname for k in ('pt', 'port')):
         return VariableType.PORT
     elif any(k in lname for k in ('tcpseq', 'tcpack')):
         return VariableType.SEQUENCING
-    elif any(k in lname for k in ('tcplen', 'iplen', 'framelen', 'iphdrlen', 'tcphdrlen')):
-        return VariableType.LENGTH
+    elif any(k in lname for k in ('len', 'bytes', 'packets', 'flows')):
+            #  ('tcplen', 'iplen', 'framelen', 'iphdrlen', 'tcphdrlen')):
+        return VariableType.SIZE
     elif 'flags' in lname:
         return VariableType.FLAG
     elif 'pointer' in lname:
         return VariableType.POINTER
     elif 'window' in lname:
         return VariableType.WINDOW
-    elif any(k in lname for k in ('tsval', 'tsecr', 'time', 'timestamp', 'epoch')):
+    elif any(k in lname for k in ('tsval', 'tsecr', 'time', 'duration', 'epoch', 'date')):
         return VariableType.TIME
     elif any(k in lname for k in ('proto', 'version')):
         return VariableType.PROTO
