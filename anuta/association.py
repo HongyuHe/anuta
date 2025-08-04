@@ -19,9 +19,36 @@ from anuta.theory import Theory
 def _encode_rule_pair(antecedent: FrozenSet[str], consequent: FrozenSet[str]) -> List[Tuple[str, FrozenSet[str]]]:
     # Encode antecedents
     predicates = frozenset(f"Eq({pred.split('_')[0]},{pred.split('_')[-1]})" for pred in antecedent)
+    preidcates = set()
+    for pred in antecedent:
+        varname = pred.split('_')[0]
+        value = pred.split('_')[-1]
+        if '@' in varname:
+            #* Abstract variable like `@Eq(SrcPt,DstPt)@`
+            assert value.isdigit(), f"Invalid value for abstract variable {varname}: {value}"
+            predicate = varname.replace('@', '') 
+            if int(value) == 0:
+                predicate = f"Not({predicate})"
+            preidcates.add(predicate)
+        else:
+            preidcates.add(f"Eq({varname},{value})")
+    predicates = frozenset(preidcates)
 
     # Return list of (consequent_predicate, antecedents)
-    return [(f"Eq({pred.split('_')[0]},{pred.split('_')[-1]})", predicates) for pred in consequent]
+    # return [(f"Eq({pred.split('_')[0]},{pred.split('_')[-1]})", predicates) for pred in consequent]
+    conseq_predicates = []
+    for pred in consequent:
+        varname = pred.split('_')[0]
+        value = pred.split('_')[-1]
+        if '@' in varname:
+            assert value.isdigit(), f"Invalid value for abstract variable {varname=} {value=}"
+            conseq_predicate = varname.replace('@', '') 
+            if int(value) == 0:
+                conseq_predicate = f"Not({conseq_predicate})"
+        else:
+            conseq_predicate = f"Eq({varname},{value})"
+        conseq_predicates.append(conseq_predicate)
+    return [(conseq_predicate, predicates) for conseq_predicate in conseq_predicates]        
 
 def get_missing_domain_rules(examples, domains) -> List[str]:
     """
@@ -67,10 +94,10 @@ class AsscoriationRuleLearner:
         te_ary = te.fit(transactions).transform(transactions)
         self.df = pd.DataFrame(te_ary, columns=te.columns_)
         self.domains = constructor.anuta.domains
-        self.learned_rules = []
+        self.learned_rules = list(constructor.anuta.prior_kb) if constructor.anuta else []
 
     def learn(self, min_threshold=1) -> pd.DataFrame:
-        log.info(f"Learning association rules ({self.algorithm}) from {len(self.df)} examples ...")
+        log.info(f"Learning from {len(self.df)} examples and {self.df.shape[1]} variables with {self.algorithm}.")
         method = None
         match self.algorithm:
             case 'apriori':
@@ -98,12 +125,12 @@ class AsscoriationRuleLearner:
         log.info(f"Association rule learning took {end - start:.2f} seconds.")
         
         # self.learned_rules = self.extract_rules(aruledf)
-        self.learned_rules = self.extract_rules_parallel(aruledf)
+        self.learned_rules += self.extract_rules_parallel(aruledf)
         log.info(f"Extracted {len(self.learned_rules)} rules.")
         
         assumptions = set()
         for varname, domain in self.domains.items():
-            if domain.kind == DomainType.CATEGORICAL:
+            if domain.kind == DomainType.CATEGORICAL and '@' not in varname:
                 assumptions.add(f"{varname} >= 0")
                 assumptions.add(f"{varname} <= {max(domain.values)}")
         # assumptions = set(assumptions) | set(get_missing_domain_rules(self.df, self.domains))
@@ -116,8 +143,9 @@ class AsscoriationRuleLearner:
         return
     
     def extract_rules_parallel(self, aruledf: pd.DataFrame) -> List[str]:
+        log.info("Extracting rules in parallel...")
         premisesmap = defaultdict(set)
-        #* === Parallel rule encoding ===
+        #* Parallel rule encoding
         num_cores = cpu_count()
         futures = []
         with ProcessPoolExecutor(max_workers=num_cores) as executor:
@@ -131,7 +159,7 @@ class AsscoriationRuleLearner:
                 for conseq_predicate, predicates in future.result():
                     premisesmap[conseq_predicate].add(predicates)
 
-        #* === Merge premises → consequents (serial logic remains) ===
+        #* Merge premises → consequents (serial logic remains)
         consequentsmap = defaultdict(set)
         for conseq_predicate, premise_sets in premisesmap.items():
             for premise in premise_sets:
@@ -143,7 +171,7 @@ class AsscoriationRuleLearner:
                 if not is_redundant:
                     consequentsmap[premise].add(conseq_predicate)
 
-        #* === Format readable rules ===
+        #* Format rules in valid syntax
         arules = []
         for antecedents, consequents in consequentsmap.items():
             premise = ' & '.join(antecedents)

@@ -715,8 +715,8 @@ class Cidds001(Constructor):
                 )
         
         prior_rules: Set[str] = set()
-        # variables, self.categoricals, prior_rules, self.df = self.build_abstract_domain(
-        #     variables, self.constants, self.df, drop_identifiers=False)
+        variables, self.categoricals, prior_rules, self.df = self.build_abstract_domain(
+            variables, self.constants, self.df, drop_identifiers=False)
                 
         domains = {}
         for name in self.df.columns:
