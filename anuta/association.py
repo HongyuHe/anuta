@@ -124,15 +124,25 @@ class AsscoriationRuleLearner:
         end = perf_counter()
         log.info(f"Association rule learning took {end - start:.2f} seconds.")
         
+        start = perf_counter()
         # self.learned_rules = self.extract_rules(aruledf)
         self.learned_rules += self.extract_rules_parallel(aruledf)
         log.info(f"Extracted {len(self.learned_rules)} rules.")
+        end = perf_counter()
+        log.info(f"Rule extraction took {end - start:.2f} seconds.")
         
         assumptions = set()
         for varname, domain in self.domains.items():
             if domain.kind == DomainType.CATEGORICAL and '@' not in varname:
                 assumptions.add(f"{varname} >= 0")
                 assumptions.add(f"{varname} <= {max(domain.values)}")
+                
+                full_domain = set(val for val in range(max(domain.values) + 1))
+                missing_values = full_domain - set(domain.values)
+                ne_predicates = []
+                for value in missing_values:
+                    ne_predicates.append(f"Ne({varname},{value})")
+                assumptions.add(' & '.join(ne_predicates))
         # assumptions = set(assumptions) | set(get_missing_domain_rules(self.df, self.domains))
         
         rules = set(self.learned_rules) | assumptions

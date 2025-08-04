@@ -152,7 +152,7 @@ cidds_conversions = {
 cidds_constants = {
 	'ip': list(cidds_conversions['ip'].values()),
 	'port': cidds_ports,
-	'packet': [42, 64, 65_535], #* MTU
+	'packet': [42, 64, 1_500, 65_535], #* MTU and header limits
     'bytes': [1],
 }
 
