@@ -102,8 +102,8 @@ if __name__ == '__main__':
                     if dataset == 'cidds' else Netflix(refdata)
             
         log.info(f"Learning from {limit} examples in {FLAGS.data}")
-        log.info(f"Domain counting enabled: {FLAGS.config.DOMAIN_COUNTING}")
-        log.info(f"Using baseline method: {FLAGS.baseline}")
+        # log.info(f"Domain counting enabled: {FLAGS.config.DOMAIN_COUNTING}")
+        # log.info(f"Using baseline method: {FLAGS.baseline}")
         if refconstructor:
             log.info(f"Reference data: {refdata}")     
         

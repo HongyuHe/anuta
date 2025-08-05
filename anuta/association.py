@@ -8,6 +8,8 @@ from time import perf_counter
 from typing import *
 from collections import defaultdict
 import sympy as sp
+from tqdm import tqdm
+from rich import print as pprint
 
 from anuta.constructor import Constructor
 from anuta.known import *
@@ -19,7 +21,7 @@ from anuta.theory import Theory
 def _encode_rule_pair(antecedent: FrozenSet[str], consequent: FrozenSet[str]) -> List[Tuple[str, FrozenSet[str]]]:
     # Encode antecedents
     predicates = frozenset(f"Eq({pred.split('_')[0]},{pred.split('_')[-1]})" for pred in antecedent)
-    preidcates = set()
+    predicates = set()
     for pred in antecedent:
         varname = pred.split('_')[0]
         value = pred.split('_')[-1]
@@ -29,10 +31,10 @@ def _encode_rule_pair(antecedent: FrozenSet[str], consequent: FrozenSet[str]) ->
             predicate = varname.replace('@', '') 
             if int(value) == 0:
                 predicate = f"Not({predicate})"
-            preidcates.add(predicate)
+            predicates.add(predicate)
         else:
-            preidcates.add(f"Eq({varname},{value})")
-    predicates = frozenset(preidcates)
+            predicates.add(f"Eq({varname},{value})")
+    predicates = frozenset(predicates)
 
     # Return list of (consequent_predicate, antecedents)
     # return [(f"Eq({pred.split('_')[0]},{pred.split('_')[-1]})", predicates) for pred in consequent]
@@ -88,6 +90,7 @@ class AsscoriationRuleLearner:
         else:
             self.num_examples = 'all'
         
+        log.info(f"Converting dataset to transactions...")
         transactions = self.df.astype(str).apply(
             lambda row: [f"{col}_{val}" for col, val in row.items()], axis=1).tolist()
         te = TransactionEncoder()
@@ -95,6 +98,7 @@ class AsscoriationRuleLearner:
         self.df = pd.DataFrame(te_ary, columns=te.columns_)
         self.domains = constructor.anuta.domains
         self.learned_rules = list(constructor.anuta.prior_kb) if constructor.anuta else []
+        # pprint(self.learned_rules)
 
     def learn(self, min_threshold=1) -> pd.DataFrame:
         log.info(f"Learning from {len(self.df)} examples and {self.df.shape[1]} variables with {self.algorithm}.")
@@ -125,8 +129,8 @@ class AsscoriationRuleLearner:
         log.info(f"Association rule learning took {end - start:.2f} seconds.")
         
         start = perf_counter()
-        # self.learned_rules = self.extract_rules(aruledf)
-        self.learned_rules += self.extract_rules_parallel(aruledf)
+        self.learned_rules += self.extract_rules(aruledf)
+        # self.learned_rules += self.extract_rules_parallel(aruledf)
         log.info(f"Extracted {len(self.learned_rules)} rules.")
         end = perf_counter()
         log.info(f"Rule extraction took {end - start:.2f} seconds.")
@@ -142,11 +146,14 @@ class AsscoriationRuleLearner:
                 ne_predicates = []
                 for value in missing_values:
                     ne_predicates.append(f"Ne({varname},{value})")
-                assumptions.add(' & '.join(ne_predicates))
+                #* Check if there's any and not port variables
+                keywords = ['pt', 'port']
+                if ne_predicates and not any(keyword in varname.lower() for keyword in keywords):
+                    assumptions.add(' & '.join(ne_predicates))
         # assumptions = set(assumptions) | set(get_missing_domain_rules(self.df, self.domains))
         
         rules = set(self.learned_rules) | assumptions
-        sprules = [sp.sympify(rule) for rule in rules]
+        sprules = [sp.sympify(rule) for rule in rules if rule not in [sp.true, sp.false]]
         Theory.save_constraints(sprules, 
                                 f'{self.algorithm}_{self.dataset}_{self.num_examples}.pl')
         
@@ -194,41 +201,78 @@ class AsscoriationRuleLearner:
     def extract_rules(self, aruledf: pd.DataFrame) -> List[str]:
         premisesmap = defaultdict(set)
 
-        # Build mapping from each consequent predicate to its supporting antecedent sets
-        for antecedent, consequent in zip(
+        #* Build mapping from each consequent predicate to its supporting antecedent sets
+        for antecedent, consequent in tqdm(zip(
             aruledf.antecedents.to_numpy(), 
             aruledf.consequents.to_numpy()
-        ):
-            # Encode antecedents
+        ), desc="Encoding antecedents and consequents", total=len(aruledf)):
+            #* Encode antecedents
             predicates = set()
             for predicate in antecedent:
                 varname = predicate.split('_')[0]
                 value = predicate.split('_')[-1]
-                predicates.add(f"Eq({varname},{value})")
+                if '@' in varname:
+                    #* Abstract variable like `@Eq(SrcPt,DstPt)@`
+                    assert value.isdigit(), f"Invalid value for abstract variable {varname}: {value}"
+                    predicate = varname.replace('@', '') 
+                    if int(value) == 0:
+                        predicate = f"Not({predicate})"
+                    predicates.add(predicate)
+                else:
+                    predicates.add(f"Eq({varname},{value})")
             predicates = frozenset(predicates)
             
-            # Encode consequents and populate mapping
+            #* Encode consequents and populate mapping
             for predicate in consequent:
                 varname = predicate.split('_')[0]
                 value = predicate.split('_')[-1]
-                conseq_predicate = f"Eq({varname},{value})"
+                if '@' in varname:
+                    assert value.isdigit(), f"Invalid value for abstract variable {varname=} {value=}"
+                    conseq_predicate = varname.replace('@', '') 
+                    if int(value) == 0:
+                        conseq_predicate = f"Not({conseq_predicate})"
+                else:
+                    conseq_predicate = f"Eq({varname},{value})"
                 premisesmap[conseq_predicate].add(predicates)
 
-        # Merge premises → consequents
+        # # Merge premises → consequents
+        # consequentsmap = defaultdict(set)
+        # for conseq_predicate, premise_sets in premisesmap.items():
+        #     for premise in premise_sets:
+        #         is_redundant = False
+        #         for other in premise_sets - {premise}:
+        #             if premise > other:  # premise is a superset
+        #                 is_redundant = True
+        #                 break
+        #         if not is_redundant:
+        #             consequentsmap[premise].add(conseq_predicate)
+        
+        #* Optimized redundancy pruning
         consequentsmap = defaultdict(set)
-        for conseq_predicate, premise_sets in premisesmap.items():
-            for premise in premise_sets:
-                is_redundant = False
-                for other in premise_sets - {premise}:
-                    if premise > other:  # premise is a superset
-                        is_redundant = True
-                        break
-                if not is_redundant:
-                    consequentsmap[premise].add(conseq_predicate)
+        for conseq_predicate, premise_sets in tqdm(
+            premisesmap.items(),
+            desc="Pruning redundant premises",
+            total=len(premisesmap)
+        ):
+            #* Smaller sets first
+            sorted_premises = sorted(premise_sets, key=len)  
+            non_redundant = []
 
-        # Format readable rules
+            for i, p in enumerate(sorted_premises):
+                #* Filter out superset premises
+                is_redundant = any(p > q for q in non_redundant)
+                if not is_redundant:
+                    non_redundant.append(p)
+                    consequentsmap[p].add(conseq_predicate)
+
+        #* Format final rules in valid syntax
         arules = []
-        for antecedents, consequents in consequentsmap.items():
+        for antecedents, consequents in tqdm(
+            consequentsmap.items(),
+            desc="Formatting rules",
+            total=len(consequentsmap)
+        ):
+            #* Join antecedents and consequents
             premise = ' & '.join(antecedents)
             conclusion = ' & '.join(consequents)
             arule = f"({premise}) >> ({conclusion})"

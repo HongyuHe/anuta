@@ -75,7 +75,8 @@ class Constructor(object):
         pass
 
     def build_abstract_domain(
-        self, variables: List[str],
+        self, 
+        variables: List[str],
         constants: Dict[str, Constants], 
         df: pd.DataFrame,
         drop_identifiers: bool = True
@@ -93,7 +94,7 @@ class Constructor(object):
         #* Variables -> their types.
         for vtype, tvars in typed_variables.items():
             for var in tvars:
-                avars.add(var)
+                # avars.add(var)
                 variable_types[var] = vtype
         
         start = perf_counter()
@@ -106,7 +107,7 @@ class Constructor(object):
             if consts.kind == ConstantType.SCALAR:
                 for const in consts.values:
                     if const == 1: continue
-                    avar = f"{const}$×${varname}"
+                    avar = f"{const}$*${varname}"
                     avars.add(avar)
                     variable_types[avar] = vtype
             #& X+c
@@ -136,7 +137,7 @@ class Constructor(object):
             for i, var1 in enumerate(numericals):
                 for var2 in numericals[i+1:]:
                     if var1 == var2: continue
-                    avar = f"{var1}$×${var2}"
+                    avar = f"{var1}$*${var2}"
                     avars.add(avar)
                     variable_types[avar] = vtype
                     avar = f"{var1}$+${var2}"
@@ -144,19 +145,22 @@ class Constructor(object):
                     variable_types[avar] = vtype
         
         # pprint(avars)
-        log.info(f"Created {len(avars)-len(variables)} abstract vars.")
+        log.info(f"Created {len(avars)} abstract vars.")
         
         #& Generate augmented predicates
         #& All pairs of A==B for A, B in avars
         # new_vars.add('0')
-        avars: List[str] = list(avars)
+        #! The order is important: raw variables first, then augmented variables.
+        avars: List[str] = variables + list(avars)
         abstract_predicates = set()
         prior_rules: Set[str] = set()
-        for i, var1 in enumerate(avars):
+        # for i, var1 in enumerate(avars):
+        #* Assumes LHS contains no operators (raw variables).
+        for j, var1 in enumerate(variables):
             vtype1 = variable_types[var1]
-            for var2 in avars[i+1:]:
-                vtype2 = variable_types[var2]
+            for var2 in avars[j+1:]:
                 if var1 == var2: continue
+                vtype2 = variable_types[var2]
                 if vtype1 != vtype2:
                     #* Don't generate predicates with different variable types.
                     continue
@@ -164,29 +168,30 @@ class Constructor(object):
                 lhs_vars = set()
                 rhs_vars = set()
                 
-                if "$" not in var1:
-                    lhs = var1
-                    lhs_vars.add(lhs)
-                else:
-                    #* Recover values and operators
-                    v1, op1, v2 = var1.split('$')
-                    lhs = f"({v1}{op1}{v2})"
-                    lhs_vars.add(v2)
-                    if op1 == '×':
-                        lhs = f"Mul({v1},{v2})"
+                assert '$' not in var1, f"LHS var {var1} shouldn't be augmented."
+                lhs = var1
+                lhs_vars.add(lhs)
+                # if "$" not in var1:
+                #     lhs = var1
+                #     lhs_vars.add(lhs)
+                # else:
+                #     #* Recover values and operators
+                #     v1, op1, v2 = var1.split('$')
+                #     lhs = f"({v1}{op1}{v2})"
+                #     lhs_vars.add(v2)
                         
-                    const = None
-                    if v1 not in variables:
-                        #* v1 is a constant
-                        const = int(v1)
-                    else:
-                        lhs_vars.add(v1)
+                #     const = None
+                #     if v1 not in variables:
+                #         #* v1 is a constant
+                #         const = int(v1)
+                #     else:
+                #         lhs_vars.add(v1)
                     
-                    if lhs not in adf.columns:
-                        if op1 == '+':
-                            adf[lhs] = const+adf[v2] if const else adf[v1]+adf[v2]
-                        elif op1 == '×':
-                            adf[lhs] = const*adf[v2] if const else adf[v1]*adf[v2]
+                #     if lhs not in adf.columns:
+                #         if op1 == '+':
+                #             adf[lhs] = const+adf[v2] if const else adf[v1]+adf[v2]
+                #         elif op1 == '*':
+                #             adf[lhs] = const*adf[v2] if const else adf[v1]*adf[v2]
                     # if adf[lhs].nunique() <= 1:
                     #     #* Skip abstract variables with only one unique value.
                     #     skipped.add(lhs)
@@ -201,8 +206,8 @@ class Constructor(object):
                     v1, op2, v2 = var2.split('$')
                     rhs = f"({v1}{op2}{v2})"
                     rhs_vars.add(v2)
-                    if op2 == '×':
-                        rhs = f"Mul({v1},{v2})"
+                    # if op2 == '×':
+                    #     rhs = f"({v1}*{v2})"
                     
                     const = None
                     if v1 not in variables:
@@ -214,7 +219,7 @@ class Constructor(object):
                     if rhs not in adf.columns:
                         if op2 == '+':
                             adf[rhs] = const+adf[v2] if const else adf[v1]+adf[v2]
-                        elif op2 == '×':
+                        elif op2 == '*':
                             adf[rhs] = const*adf[v2] if const else adf[v1]*adf[v2]
                     # if adf[rhs].nunique() <= 1:
                     #     #* Skip abstract variables with only one unique value.
@@ -269,7 +274,8 @@ class Constructor(object):
         end = perf_counter()
         log.info(f"Generated {len(abstract_predicates)} abstract predicates in {end-start:.2f} seconds.")
         log.info(f"Learned {len(prior_rules)} prior rules.")
-        # print(abstract_predicates)
+        # pprint(abstract_predicates)
+        # pprint(prior_rules)
         # print(f"{new_vars=}")
         assert not (abstract_predicates & set(variables)), f"Abstract variables overlap with existing variables."
         new_variables = list(abstract_predicates) + variables
