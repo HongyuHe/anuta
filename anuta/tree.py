@@ -157,7 +157,7 @@ class EntropyTreeLearner(TreeLearner):
         self.trees: Dict[str, List[H2ORandomForestEstimator]] = defaultdict(list)
         self.learned_rules: Set[str] = set(self.prior)  # Start with prior rules
         # # pprint(self.domains)
-        pprint(self.dtypes)
+        # pprint(self.dtypes)
     
     def learn(self):
         log.info(f"{self.__class__.__name__}: Training {self.total_treegroups} tree groups from {len(self.examples)}"

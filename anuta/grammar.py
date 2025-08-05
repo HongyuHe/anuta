@@ -91,6 +91,8 @@ def get_variable_type(name: str) -> VariableType:
 
     if any(k in lname for k in ('ipsrc', 'ipdst', 'ipaddr')):
         return VariableType.IP
+    elif 'ttl' in lname:
+        return VariableType.TTL
     elif any(k in lname for k in ('pt', 'port')):
         return VariableType.PORT
     elif any(k in lname for k in ('tcpseq', 'tcpack')):
@@ -108,8 +110,6 @@ def get_variable_type(name: str) -> VariableType:
         return VariableType.TIME
     elif any(k in lname for k in ('proto', 'version')):
         return VariableType.PROTO
-    elif 'ttl' in lname:
-        return VariableType.TTL
     else:
         return VariableType.UNKNOWN
 

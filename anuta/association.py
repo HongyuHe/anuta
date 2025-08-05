@@ -153,7 +153,8 @@ class AsscoriationRuleLearner:
         # assumptions = set(assumptions) | set(get_missing_domain_rules(self.df, self.domains))
         
         rules = set(self.learned_rules) | assumptions
-        sprules = [sp.sympify(rule) for rule in rules if rule not in [sp.true, sp.false]]
+        sprules = [sp.sympify(rule) for rule in rules]
+        sprules = list(filter(lambda r: r not in (sp.true, sp.false), sprules))
         Theory.save_constraints(sprules, 
                                 f'{self.algorithm}_{self.dataset}_{self.num_examples}.pl')
         

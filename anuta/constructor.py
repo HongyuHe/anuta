@@ -85,6 +85,7 @@ class Constructor(object):
         avars: Set[str] = set()
         variable_types = {}
         typed_variables, grouped_variables = group_variables_by_type(self.df.columns)
+        # pprint(typed_variables)
         # pprint(grouped_variables)
         categoricals = []
         for domaintype, varnames in grouped_variables.items():

@@ -5,7 +5,7 @@ def get_config():
     default_config = config_dict.ConfigDict()
     
     default_config.MIN_SPLIT_GAIN = 1e-6  #* Minimum gain to split a node
-    default_config.MAX_COMBO_SIZE = 1000 #* If combo size is negative, use all combinations
+    default_config.MAX_COMBO_SIZE = 0 #* If combo size is negative, use all combinations
 
     # default_config.BASELINE = False
     default_config.ARITY_LIMIT = 3
