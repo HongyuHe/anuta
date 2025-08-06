@@ -176,6 +176,7 @@ class EntropyTreeLearner(TreeLearner):
         treeid = 1
         for target, feature_group in self.featuregroups.items():
             log.info(f"{target=}: {len(feature_group)} feature groups.")
+            print(f"... Trained {treeid}/{self.total_treegroups} ({treeid/self.total_treegroups:.1%}) tree groups.", end='\r')
             if target in self.categoricals:
                 params = self.model_configs['classification']
             else:
@@ -194,7 +195,7 @@ class EntropyTreeLearner(TreeLearner):
                     log.error(f"Failed to train tree for {target} with features {features}.")
                     self.trees[target].append(None)
                     # exit(1)
-                print(f"... Trained {treeid}/{self.total_treegroups} ({treeid/self.total_treegroups:.1%}) tree groups ({target=}).", end='\r')
+                print(f"... Trained {treeid}/{self.total_treegroups} ({treeid/self.total_treegroups:.1%}) tree groups.", end='\r')
         end = perf_counter()
         log.info(f"Training {self.total_treegroups} tree groups took {end - start:.2f} seconds.")
         
