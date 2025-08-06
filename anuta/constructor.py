@@ -67,6 +67,8 @@ class Constructor(object):
         self.anuta: Anuta = None
         self.categoricals: list[str] = []
         self.feature_marker = ''
+        #* Variables of a column containing an (abstract) variable
+        self.colvars: Dict[str, Set[str]] = defaultdict(set)
     
     def get_indexset_and_counter(
             self, df: pd.DataFrame,
@@ -97,6 +99,7 @@ class Constructor(object):
             for var in tvars:
                 # avars.add(var)
                 variable_types[var] = vtype
+                self.colvars[var].add(var)
         
         start = perf_counter()
         for varname, consts in constants.items():
@@ -242,6 +245,7 @@ class Constructor(object):
                     adf[predicate] = predicate_values
                     abstract_predicates.add(predicate)
                     categoricals.append(predicate)
+                    self.colvars[predicate].update(lhs_vars | rhs_vars)
                 else:
                     predicate = predicate.replace('@', '')
                     #* Invert the predicate if it's always false.
@@ -262,6 +266,7 @@ class Constructor(object):
                         adf[predicate] = predicate_values
                         abstract_predicates.add(predicate)
                         categoricals.append(predicate)
+                        self.colvars[predicate].update(lhs_vars | rhs_vars)
                     else:
                         predicate = predicate.replace('@', '')
                         if predicate_values.iloc[0] == 0:
@@ -521,9 +526,9 @@ class Mawi(Constructor):
 
         variables, self.categoricals, prior_rules, self.df = self.build_abstract_domain(
             variables, self.constants, self.df)
-        # #* Remove identifiers after adding the predicates.
-        # self.df.drop(columns=typed_variables[VariableType.IP] + 
-        #              typed_variables[VariableType.PORT], inplace=True)
+        #! Only consider the categorical variables for now.
+        self.df = self.df[self.categoricals]
+        variables = self.categoricals
         
         domains = {}
         for name in self.df.columns:
@@ -536,7 +541,7 @@ class Mawi(Constructor):
                 domains[name] = Domain(DomainType.CATEGORICAL, 
                                        None, 
                                        self.df[name].unique().tolist())
-        #TODO: Add prior rules
+
         self.anuta = Anuta(variables, domains, self.constants, prior_kb=prior_rules)
         # pprint(self.anuta.variables)
         # pprint(self.anuta.domains)
@@ -619,6 +624,9 @@ class Netflix(Constructor):
         # self.df.to_csv('netflix_abstracted.csv', index=False)
         variables, self.categoricals, prior_rules, self.df = self.build_abstract_domain(
             variables, self.constants, self.df)
+        #! Only consider the categorical variables for now.
+        self.df = self.df[self.categoricals]
+        variables = self.categoricals
         
         domains = {}
         for name in self.df.columns:

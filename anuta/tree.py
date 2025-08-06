@@ -23,28 +23,25 @@ from anuta.utils import log, true, false
 from anuta.cli import FLAGS
 
 
-def get_featuregroups(df: pd.DataFrame, feature_marker: str='') -> Dict[str, List[Tuple[str, ...]]]:
+def get_featuregroups(
+    df: pd.DataFrame, 
+    colvars: Dict[str, Set[str]],
+    feature_marker: str='',
+) -> Dict[str, List[Tuple[str, ...]]]:
     """Generate all feature groups for the given variables."""
-    log.info(f"Generating feature groups with marker '{feature_marker}'")
+    log.info(f"{feature_marker=}")
+    log.info(f"{FLAGS.config.MAX_COMBO_SIZE=}")
+    
     featuregroups = defaultdict(list)
     variables = list(df.columns)
-    log.info(f"{FLAGS.config.MAX_COMBO_SIZE=}")
-    for target in variables:
+    for target in tqdm(variables, desc="Generating feature groups"):
+        #* Skip targets with only one unique value
         if df[target].nunique() <= 1:
-            # Skip targets with only one unique value
-            # if '@' in target:
-            #     #* Abstract variable, skip it
-            #     log.info(f"Skipping abstract {target=} with only one unique value.")
             continue
-        features = [v for v in variables if v != target and feature_marker in v]
-        # for feature in features:
-        #     #* OOF grouping
-        #     featuregroups[target].append([feature])
-            
-        #     # suppressed = features.copy()
-        #     # #* Suppress the current feature from the group
-        #     # suppressed.remove(feature)
-        #     # featuregroups[target].append(suppressed)
+        #* Features shouldn't contain overlapping varvars with the target
+        features = [v for v in variables if 
+                    not (colvars[v] & colvars[target]) and
+                    feature_marker in v]
             
         combo_size = min(FLAGS.config.MAX_COMBO_SIZE, len(features) - 1)
         # log.info(f"Max combo size for {target} is {combo_size}.")
@@ -53,20 +50,31 @@ def get_featuregroups(df: pd.DataFrame, feature_marker: str='') -> Dict[str, Lis
         if combo_size <= 0:
             # No combinations to generate, skip further processing
             continue 
-        skipped = set()
+        # skipped = set()
         for n in range(1, combo_size+1):
             _featuregroup = [list(combo) for combo in itertools.combinations(features, n)]
             featuregroup = []
             for combo in _featuregroup:
-                if tuple(combo) in skipped:
-                    #* Skip already skipped combinations
-                    continue
+                # if tuple(combo) in skipped:
+                #     #* Skip already skipped combinations
+                #     continue
                 # if len(combo) < 3 and df[combo].drop_duplicates().shape[0] == 1:
                 #     #* h2o will fail to train a tree on a feature group with single unique value,
                 #     #*  but it's a costly operation to check, so only do it for small feature groups.
                 #     skipped.add(tuple(combo))
                 #     continue
                 # else:
+                
+                # #* Check if the variables in the combo contain overlapping varvars
+                total_num_vars = sum(len(colvars[v]) for v in combo)
+                all_vars = set()
+                for col in combo:
+                    all_vars |= colvars[col]
+                if total_num_vars < len(all_vars):
+                    #* If the total number of variables in the combo is less than the number of unique varvars,
+                    #*  it means there are overlapping varvars, so skip this combo.
+                    log.info(f"Skipping combo {combo} for {target} due to overlapping varvars.")
+                    continue
                 featuregroup.append(combo)
             featuregroups[target] += featuregroup
         # log.info(f"{target}: Skipped {nskiped} feature groups with single unique value.")
@@ -96,7 +104,8 @@ class TreeLearner(object):
             # if var in self.categoricals
         ]
         self.features = [var for var in self.variables if constructor.feature_marker in var]
-        self.featuregroups = get_featuregroups(self.examples, constructor.feature_marker)
+        self.featuregroups = get_featuregroups(
+            self.examples, constructor.colvars, constructor.feature_marker)
         self.total_treegroups = len(self.examples.columns) * \
             len(list(self.featuregroups.values())[0])  # Total number of tree groups to learn
         
@@ -160,8 +169,8 @@ class EntropyTreeLearner(TreeLearner):
         # pprint(self.dtypes)
     
     def learn(self):
-        log.info(f"{self.__class__.__name__}: Training {self.total_treegroups} tree groups from {len(self.examples)}"
-                 f" examples and {len(self.features)} features ({len(self.categoricals)} categorical vars).")
+        log.info(f"{self.__class__.__name__}: Training {self.total_treegroups} tree groups.")
+        log.info(f"{len(self.examples)} examples and {len(self.features)} features ({len(self.categoricals)} categorical vars).")
         
         start = perf_counter()
         treeid = 1
