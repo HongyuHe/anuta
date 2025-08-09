@@ -66,15 +66,15 @@ def get_featuregroups(
                 # else:
                 
                 # #* Check if the variables in the combo contain overlapping varvars
-                total_num_vars = sum(len(colvars[v]) for v in combo)
-                all_vars = set()
-                for col in combo:
-                    all_vars |= colvars[col]
-                if total_num_vars < len(all_vars):
-                    #* If the total number of variables in the combo is less than the number of unique varvars,
-                    #*  it means there are overlapping varvars, so skip this combo.
-                    log.info(f"Skipping combo {combo} for {target} due to overlapping varvars.")
-                    continue
+                # total_num_vars = sum(len(colvars[v]) for v in combo)
+                # all_vars = set()
+                # for col in combo:
+                #     all_vars |= colvars[col]
+                # if total_num_vars < len(all_vars):
+                #     #* If the total number of variables in the combo is less than the number of unique varvars,
+                #     #*  it means there are overlapping varvars, so skip this combo.
+                #     log.info(f"Skipping combo {combo} for {target} due to overlapping varvars.")
+                #     continue
                 featuregroup.append(combo)
             featuregroups[target] += featuregroup
         # log.info(f"{target}: Skipped {nskiped} feature groups with single unique value.")
@@ -197,11 +197,13 @@ class EntropyTreeLearner(TreeLearner):
                     # exit(1)
                 print(f"... Trained {treeid}/{self.total_treegroups} ({treeid/self.total_treegroups:.1%}) tree groups.", end='\r')
         end = perf_counter()
-        log.info(f"Training {self.total_treegroups} tree groups took {end - start:.2f} seconds.")
+        training_time = end - start
         
         start = perf_counter()
         self.learned_rules |= self.extract_rules_from_treepaths()
         end = perf_counter()
+        
+        log.info(f"Training {self.total_treegroups} tree groups took {training_time:.2f} seconds.")
         log.info(f"Learned {len(self.learned_rules)} rules from {self.total_treegroups} trees.")
         log.info(f"Extracting rules took {end - start:.2f} seconds.")
         
@@ -341,10 +343,14 @@ class EntropyTreeLearner(TreeLearner):
                                     #TODO: Accumulate logits to decide which condition to take. Discard all together for now.
                                     print(f"[Conflicting condition!!!]: {varname=}:{conditions}")
                                 if valmin == valmax:
-                                    # predicates.append(f"Eq({varname}, {valmin})")
-                                    # log.warning(
-                                    #     f"Skipping overly strict rule for {target} ({varname}={valmin}).")
-                                    continue
+                                    if valmin == 0:
+                                        predicate = f"Eq({varname}, 0)"
+                                    else:
+                                        #* Too strict condition, skip it
+                                        # predicates.append(f"Eq({varname}, {valmin})")
+                                        # log.warning(
+                                        #     f"Skipping overly strict rule for {target} ({varname}={valmin}).")
+                                        continue
                                 if valmin > float('-inf'):
                                     predicates.append(f"({varname} > {valmin})")
                                 if valmax < float('+inf'):
@@ -390,10 +396,13 @@ class EntropyTreeLearner(TreeLearner):
                         targetmin = ruleset[premise]['min']
                         targetmax = ruleset[premise]['max']
                         if targetmin == targetmax:
-                            #* Too strict condition, skip it
-                            # log.warning(
-                            #     f"Skipping overly strict rule for {target} (min==max: {targetmin}).")
-                            continue
+                            if targetmin == 0:
+                                conclusion = f"Eq({target}, 0)"
+                            else:
+                                #* Too strict condition, skip it
+                                # log.warning(
+                                #     f"Skipping overly strict rule for {target} (min==max: {targetmin}).")
+                                continue
                         conclusion = f"(({target}>={targetmin}) & ({target}<={targetmax}))"
                         # \ if targetmin != targetmax else f"Eq({target}, {targetmin})"
                     

@@ -1,49 +1,49 @@
 [
 {
-"description": "TCP 3-Way Handshake",
+"description": "TCP 3-Way Handshake [arity=9]",
 "queries": [
 "Implies(Eq(IpDst_2, IpSrc_1) & Eq(IpSrc_2, IpDst_1) & Eq(TcpFlags_1, 2) & Eq(TcpFlags_2, 18) & Eq(TcpFlags_3, 16), Eq(TcpSeq_3, TcpAck_2) & Eq(TcpAck_2, TcpSeq_1 + 1) & Eq(TcpAck_3, TcpSeq_2 + 1))"
 ]
 },
 {
-"description": "PSH-ACK Data Followed by ACK",
+"description": "PSH-ACK Data Followed by ACK [arity=8]",
 "queries": [
 "Implies(Eq(IpDst_2, IpSrc_1) & Eq(IpSrc_2, IpDst_1) & Eq(TcpFlags_1, 24) & Eq(Tsval_1, Tsecr_2), Eq(TcpFlags_2, 4) | Eq(TcpFlags_2, 16) | Eq(TcpFlags_2, 17) | Eq(TcpFlags_2, 20) | Eq(TcpFlags_2, 24))"
 ]
 },
 {
-"description": "FIN-ACK Sequence",
+"description": "FIN-ACK Sequence [arity=6]",
 "queries": [
 "Implies(Eq(TcpFlags_1, 17) & Eq(Tsval_1, Tsecr_2), Eq(TcpFlags_2, 16) & Eq(TcpAck_2, TcpSeq_1 + 1))"
 ]
 },
 {
-"description": "Pure ACK Response (No Payload)",
+"description": "Pure ACK Response (No Payload) [arity=4]",
 "queries": [
 "Implies(Eq(TcpFlags_2, 16) & Eq(TcpLen_2, 0) & Eq(TcpSeq_2, TcpAck_1) & Eq(TcpAck_1, TcpSeq_2), Eq(TcpSeq_2, TcpAck_1))"
 ]
 },
 {
-"description": "Immediate Retransmission Detection",
+"description": "Immediate Retransmission Detection [arity=12, dc]",
 "queries": [
 "Implies(Eq(IpDst_1, IpDst_2) & Eq(IpSrc_1, IpSrc_2) & Eq(TcpFlags_1, TcpFlags_2) & Eq(TcpLen_1, TcpLen_2) & Eq(TcpSeq_1, TcpSeq_2), Eq(IpSrc_1, IpSrc_2) & Eq(IpDst_1, IpDst_2))",
 "Implies(Eq(IpDst_2, IpDst_3) & Eq(IpSrc_2, IpSrc_3) & Eq(TcpFlags_2, TcpFlags_3) & Eq(TcpLen_2, TcpLen_3) & Eq(TcpSeq_2, TcpSeq_3), Eq(IpSrc_3, IpSrc_3) & Eq(IpDst_2, IpDst_3))"
 ]
 },
 {
-"description": "Duplicate ACK Detection",
+"description": "Duplicate ACK Detection [arity=8]",
 "queries": [
 "Implies(Eq(TcpAck_1, TcpAck_2) & Eq(TcpAck_2, TcpAck_3) & Eq(TcpFlags_1, 16) & Eq(TcpFlags_2, 16) & Eq(TcpFlags_3, 16), Eq(IpDst_1, IpDst_2) & Eq(IpDst_2, IpDst_3) & Eq(IpSrc_1, IpSrc_2) & Eq(IpSrc_2, IpSrc_3))"
 ]
 },
 {
-"description": "Timestamp Echo Validation (TSval & TSecr)",
+"description": "Timestamp Echo Validation (TSval & TSecr) [arity=8]",
 "queries": [
 "Implies(Eq(IpDst_2, IpSrc_1) & Eq(IpSrc_2, IpDst_1) & (TcpLen_1 > 0) & (TcpLen_2 > 0), Tsecr_2 <= Tsval_1)"
 ]
 },
 {
-"description": "IP TTL Sanity Rule",
+"description": "IP TTL Sanity Rule [arity=2]",
 "queries": [
 "And(IpTtl_1 > 0, IpTtl_1 <= 255)",
 "And(IpTtl_2 > 0, IpTtl_2 <= 255)",
@@ -51,7 +51,7 @@
 ]
 },
 {
-"description": "IP/TCP Header Length Alignment (Multiple of 4 bytes)",
+"description": "IP/TCP Header Length Alignment (Multiple of 4 bytes) [arity=1]",
 "queries": [
 "Eq(Mod(IpHdrLen_1, 4), 0)",
 "Eq(Mod(IpHdrLen_2, 4), 0)",
@@ -62,46 +62,46 @@
 ]
 },
 {
-"description": "Flow Direction Consistency",
+"description": "Flow Direction Consistency [arity=6, dc]",
 "queries": [
 "Implies(Eq(IpDst_1, IpSrc_2) & Eq(IpSrc_1, IpDst_2), Eq(TcpDstport_1, TcpSrcport_2) & Eq(TcpSrcport_1, TcpDstport_2))"
 ]
 },
 {
-"description": "Three-Way Handshake with Timestamp",
+"description": "Three-Way Handshake with Timestamp (arity=7)",
 "queries": [
 "Implies(Eq(TcpFlags_1, 2) & Eq(TcpFlags_2, 18) & Eq(TcpFlags_3, 16) & (Tsval_1 > 0) & (Tsval_2 > 0), Eq(Tsecr_2, Tsval_1) & Eq(Tsecr_3, Tsval_2))"
 ]
 },
 {
-"description": "IP Header Length and Total Length Consistency",
+"description": "IP Header Length and Total Length Consistency [arity=4]",
 "queries": [
 "Eq(IpLen_1, IpHdrLen_1 + TcpHdrLen_1 + TcpLen_1)"
 ]
 },
 {
-"description": "Sequence Number Incrementation in Stream",
+"description": "Sequence Number Incrementation in Stream [arity=10]",
 "queries": [
 "Implies(Eq(IpSrc_1, IpDst_2) & Eq(IpSrc_2, IpDst_1) & Eq(Tsecr_2, Tsval_1) & (TcpLen_1 > 0) & (TcpLen_2 > 0), Eq(TcpAck_2, TcpLen_1 + TcpSeq_1))",
 "Implies(Eq(IpSrc_2, IpDst_3) & Eq(IpSrc_3, IpDst_2) & Eq(Tsecr_3, Tsval_2) & (TcpLen_2 > 0) & (TcpLen_3 > 0), Eq(TcpAck_3, TcpLen_2 + TcpSeq_2))"
 ]
 },
 {
-"description": "TCP Phantom Byte for SYN/FIN (len=0)",
+"description": "TCP Phantom Byte for SYN/FIN (len=0) [arity=10]",
 "queries": [
 "Implies(Eq(IpSrc_1, IpDst_2) & Eq(IpSrc_2, IpDst_1) & Eq(TcpLen_1, 0) & Eq(Tsecr_2, Tsval_1) & (Eq(TcpFlags_1, 1) | Eq(TcpFlags_1, 2) | Eq(TcpFlags_1, 17) | Eq(TcpFlags_1, 18)), Eq(TcpAck_2, TcpSeq_1 + 1))",
 "Implies(Eq(IpSrc_2, IpDst_3) & Eq(IpSrc_3, IpDst_2) & Eq(TcpLen_2, 0) & Eq(Tsecr_3, Tsval_2) & (Eq(TcpFlags_2, 1) | Eq(TcpFlags_2, 2) | Eq(TcpFlags_2, 17) | Eq(TcpFlags_2, 18)), Eq(TcpAck_3, TcpSeq_2 + 1))"
 ]
 },
 {
-"description": "Normal Empty Segment (No SYN/FIN)",
+"description": "Normal Empty Segment (No SYN/FIN) [arity=10]",
 "queries": [
 "Implies(Eq(IpSrc_1, IpDst_2) & Eq(IpSrc_2, IpDst_1) & Eq(TcpLen_1, 0) & Eq(Tsecr_2, Tsval_1) & ~(Eq(TcpFlags_1, 1) | Eq(TcpFlags_1, 2) | Eq(TcpFlags_1, 17) | Eq(TcpFlags_1, 18)), Eq(TcpAck_2, TcpSeq_1))",
 "Implies(Eq(IpSrc_2, IpDst_3) & Eq(IpSrc_3, IpDst_2) & Eq(TcpLen_2, 0) & Eq(Tsecr_3, Tsval_2) & ~(Eq(TcpFlags_2, 1) | Eq(TcpFlags_2, 2) | Eq(TcpFlags_2, 17) | Eq(TcpFlags_2, 18)), Eq(TcpAck_3, TcpSeq_2))"
 ]
 },
 {
-"description": "TCP Window Scaling Equation",
+"description": "TCP Window Scaling Equation [arity=3]",
 "queries": [
 "Eq(TcpWindowSizeScalefactor_1*TcpWindowSizeValue_1, TcpWindowSize_1)",
 "Eq(TcpWindowSizeScalefactor_2*TcpWindowSizeValue_2, TcpWindowSize_2)",
@@ -109,14 +109,14 @@
 ]
 },
 {
-"description": "Sequence Number Continuity in Consecutive Packets",
+"description": "Sequence Number Continuity in Consecutive Packets [arity=9]",
 "queries": [
 "Implies(Eq(IpDst_1, IpDst_2) & Eq(IpSrc_1, IpSrc_2) & ~(Eq(TcpFlags_1, 1) | Eq(TcpFlags_1, 2) | Eq(TcpFlags_1, 17) | Eq(TcpFlags_1, 18)) & ~(Eq(TcpFlags_2, 1) | Eq(TcpFlags_2, 2) | Eq(TcpFlags_2, 17) | Eq(TcpFlags_2, 18)), TcpSeq_2 >= TcpLen_1 + TcpSeq_1)",
 "Implies(Eq(IpDst_2, IpDst_3) & Eq(IpSrc_2, IpSrc_3) & ~(Eq(TcpFlags_2, 1) | Eq(TcpFlags_2, 2) | Eq(TcpFlags_2, 17) | Eq(TcpFlags_2, 18)) & ~(Eq(TcpFlags_3, 1) | Eq(TcpFlags_3, 2) | Eq(TcpFlags_3, 17) | Eq(TcpFlags_3, 18)), TcpSeq_3 >= TcpLen_2 + TcpSeq_2)"
 ]
 },
 {
-"description": "Acknowledgment Number Continuity in Consecutive Packets",
+"description": "Acknowledgment Number Continuity in Consecutive Packets [arity=10]",
 "queries": [
 "Implies(Eq(IpSrc_1, IpDst_2) & Eq(IpSrc_2, IpDst_1) & (TcpLen_1 > 0) & (TcpLen_2 > 0) & Eq(Tsecr_2, Tsval_1), Eq(TcpAck_2, TcpSeq_1 + TcpLen_1))",
 "Implies(Eq(IpSrc_2, IpDst_3) & Eq(IpSrc_3, IpDst_2) & (TcpLen_2 > 0) & (TcpLen_3 > 0) & Eq(Tsecr_3, Tsval_2), Eq(TcpAck_3, TcpSeq_2 + TcpLen_2))"
