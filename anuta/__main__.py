@@ -17,7 +17,7 @@ warnings.filterwarnings("ignore")
 
 from anuta.constructor import Constructor, Millisampler, Cidds001, Netflix, Cicids2017, Yatesbury, Mawi
 from anuta.tree import EntropyTreeLearner, XgboostTreeLearner, LightGbmTreeLearner
-from anuta.association import AsscoriationRuleLearner
+from anuta.association import AssociationRuleLearner
 from anuta.theory import Theory
 from anuta.miner import miner_versionspace, miner_valiant, validator
 from anuta.utils import log
@@ -40,7 +40,7 @@ def main(constructor: Constructor, refconstructor: Constructor, limit: int):
                 raise ValueError(f"Unknown tree type: {FLAGS.tree}")
         learner.learn()
     elif FLAGS.assoc:
-        learner = AsscoriationRuleLearner(
+        learner = AssociationRuleLearner(
             constructor, algorithm=FLAGS.assoc, limit=limit)
         log.info("Learning constraints using association rules...")
         learner.learn()

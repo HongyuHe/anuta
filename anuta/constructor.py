@@ -86,13 +86,19 @@ class Constructor(object):
         adf = df.copy()
         avars: Set[str] = set()
         variable_types = {}
-        typed_variables, grouped_variables = group_variables_by_type(self.df.columns)
+        prior_rules: Set[str] = set()
+        typed_variables, grouped_variables = group_variables_by_type(variables)
         # pprint(typed_variables)
         # pprint(grouped_variables)
         categoricals = []
-        for domaintype, varnames in grouped_variables.items():
-            if domaintype == DomainType.CATEGORICAL:
-                categoricals.extend(varnames)
+        for varname in grouped_variables[DomainType.CATEGORICAL]:
+            if df[varname].nunique() > 1:
+                #* Only consider categorical variables with more than one unique value.
+                categoricals.append(varname)
+            else:
+                #* Neglect variables with only one unique value but add them to prior rules.
+                variables.remove(varname)
+                prior_rules.add(f"Eq({varname}, {df[varname].iloc[0].item()})")
         
         #* Variables -> their types.
         for vtype, tvars in typed_variables.items():
@@ -125,7 +131,7 @@ class Constructor(object):
                 avar = f"1$+${varname}"
                 avars.add(avar)
                 variable_types[avar] = vtype
-            #& X>c    
+            #& X>c 
             if consts.kind == ConstantType.LIMIT:
                 #* Trees are good at this, so we don't augment these variables.
                 pass
@@ -157,11 +163,36 @@ class Constructor(object):
         #! The order is important: raw variables first, then augmented variables.
         avars: List[str] = variables + list(avars)
         abstract_predicates = set()
-        prior_rules: Set[str] = set()
+        
         # for i, var1 in enumerate(avars):
-        #* Assumes LHS contains no operators (raw variables).
+        #! Assumes LHS contains no operators (raw variables).
         for j, var1 in enumerate(variables):
             vtype1 = variable_types[var1]
+            domaintype1 = TYPE_DOMIAN[vtype1]
+            if domaintype1 == DomainType.NUMERICAL:
+                #& Comparing with 0 for raw variables: A>0
+                predicate = f"@({var1}>0)@"
+                if predicate not in adf.columns:
+                    predicate_values = (adf[var1] > 0).astype(int)
+                else:
+                    log.warning(f"Duplicated {predicate=}.")
+                if predicate_values.nunique() > 1:
+                    adf[predicate] = predicate_values
+                    abstract_predicates.add(predicate)
+                    categoricals.append(predicate)
+                    self.colvars[predicate].add(var1)
+                else:
+                    predicate = predicate.replace('@', '')
+                    if predicate_values.iloc[0] == 0:
+                        predicate = f"Not({predicate})"
+                    prior_rules.add(predicate)
+                
+                #& Add bounds for raw numerical variables
+                #! This part is duplicated if numerical vars aren't removed.
+                assert var1 in adf.columns, f"Expected {var1} to be in the dataframe."
+                varmin, varmax = adf[var1].min().item(), adf[var1].max().item()
+                prior_rules.add(f"({var1}>={varmin}) & ({var1}<={varmax})")
+            
             for var2 in avars[j+1:]:
                 if var1 == var2: continue
                 vtype2 = variable_types[var2]
@@ -210,8 +241,6 @@ class Constructor(object):
                     v1, op2, v2 = var2.split('$')
                     rhs = f"({v1}{op2}{v2})"
                     rhs_vars.add(v2)
-                    # if op2 == '×':
-                    #     rhs = f"({v1}*{v2})"
                     
                     const = None
                     if v1 not in variables:
@@ -253,7 +282,6 @@ class Constructor(object):
                         predicate = f"Ne({lhs},{rhs})"
                     prior_rules.add(predicate)
                 
-                domaintype1 = TYPE_DOMIAN[vtype1]
                 if domaintype1 == DomainType.NUMERICAL:
                     #& Comparison predicates: A>B
                     predicate = f"@({lhs}>{rhs})@"
@@ -272,6 +300,7 @@ class Constructor(object):
                         if predicate_values.iloc[0] == 0:
                             predicate = f"Not({predicate})"
                         prior_rules.add(predicate)
+                    
                     # if '+' not in lhs:
                     #     new_vars.add(f"@({lhs} > 0)")
                     # if '+' not in rhs:
@@ -484,31 +513,6 @@ class Mawi(Constructor):
         self.df = generate_sliding_windows(df, stride=1, window=3)
         
         variables = list(self.df.columns)
-        # typed_variables, grouped_variables = group_variables_by_type(self.df.columns)
-        # self.categoricals = [varname for varname, domaintype in grouped_variables.items()
-        #                      if domaintype == DomainType.CATEGORICAL]
-        
-        # for name in self.df.columns:
-        #     if any(keyword in name.lower() for keyword in ('src', 'dst', 'proto', 'flags')):
-        #         self.categoricals.append(name)
-        # print(f"Categorical variables: {self.categoricals}")
-        
-        # #TODO: Move to known.py
-        # typed_variables: Dict[VariableType, List[str]] = defaultdict(list)
-        # for name in self.df.columns:
-        #     if any(keyword in name.lower() for keyword in ('src', 'dst', 'port')):
-        #         typed_variables[VariableType.ID].append(name)
-        #     elif any(keyword in name.lower() for keyword in ('len', 'size', 'window')):
-        #         typed_variables[VariableType.SIZE].append(name)
-        #     elif any(keyword in name.lower() for keyword in ('time', 'epoch', 'duration', 'ts')):
-        #         typed_variables[VariableType.TIME].append(name)
-        #     elif any(keyword in name.lower() for keyword in ('seq', 'ack', 'ttl')):
-        #         typed_variables[VariableType.COUNT].append(name)
-        #     elif any(keyword in name.lower() for keyword in ('proto', 'flags', 'pointer', 'version')):
-        #         typed_variables[VariableType.CLASS].append(name)
-        #     else:
-        #         raise ValueError(f"Unknown variable type for {name}.")
-        # pprint(typed_variables)
             
         #TODO: Improve
         self.constants: dict[str, Constants] = {}
@@ -526,9 +530,9 @@ class Mawi(Constructor):
 
         variables, self.categoricals, prior_rules, self.df = self.build_abstract_domain(
             variables, self.constants, self.df)
-        #! Only consider the categorical variables for now.
-        self.df = self.df[self.categoricals]
-        variables = self.categoricals
+        # #! Only consider the categorical variables for now.
+        # self.df = self.df[self.categoricals]
+        # variables = self.categoricals
         
         domains = {}
         for name in self.df.columns:
