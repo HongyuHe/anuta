@@ -180,8 +180,9 @@ class EntropyTreeLearner(TreeLearner):
         
         max_reove_conquer_epochs = FLAGS.config.MAX_REMOVE_CONQUER_EPOCHS
         epoch = 0
-        new_rules = float('inf')
-        while epoch < max_reove_conquer_epochs and new_rules > 0:
+        new_rule_count = float('inf')
+        new_rule_counts = []
+        while epoch < max_reove_conquer_epochs and new_rule_count > 0:
             epoch += 1
             self.trees.clear()
             print(f"\tEpochs {epoch}/{max_reove_conquer_epochs} of remove-and-conquer.")
@@ -228,9 +229,10 @@ class EntropyTreeLearner(TreeLearner):
             start = perf_counter()
             before_nrules = len(self.learned_rules)
             self.learned_rules |= self.extract_rules_from_treepaths()
-            new_rules = len(self.learned_rules) - before_nrules
+            new_rule_count = len(self.learned_rules) - before_nrules
             end = perf_counter()
             extraction_time = end - start
+            new_rule_counts.append(new_rule_count)
             print()
             
             remaining = 0
@@ -250,16 +252,18 @@ class EntropyTreeLearner(TreeLearner):
                     assert len(remaining_idx) == 0, \
                         f"Expected no unclassified examples for {target}, but {remaining_idx=}."
                     log.info(f"All examples for {target} are classified. Skipping.")
+                    continue
                 log.info(f"{total_unclassified/self.examples.nrows:.1%} unclassified examples for {target}.")
             
             print(f"\tTraining {self.total_treegroups} tree groups took {training_time:.2f} seconds.")
             print(f"\tExtracting rules took {extraction_time:.2f} seconds.")
             print(f"\tTotal remaining examples: {remaining}.")
-            print(f"\tLearned {new_rules=} in epoch {epoch}.")
+            print(f"\tLearned {new_rule_count=} in epoch {epoch}.")
             print(f"\tTotal learned rules: {len(self.learned_rules)}.")
             print()
 
         log.info(f"Learning completed after {epoch} epochs.")
+        print(f"{new_rule_counts=}")
         assumptions = set()
         for varname, domain in self.domains.items():
             if '@' in varname:
