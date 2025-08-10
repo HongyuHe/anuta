@@ -278,7 +278,7 @@ class EntropyTreeLearner(TreeLearner):
         sprules = [sp.sympify(rule) for rule in rules]
         sprules = list(filter(lambda r: r not in (true, false), sprules))
         log.info(f"Total rules saved: {len(sprules)}")
-        Theory.save_constraints(sprules, f'dt_{self.dataset}_{self.num_examples}_r{epoch}.pl')
+        Theory.save_constraints(sprules, f'dt_{self.dataset}_{self.num_examples}_e{epoch}.pl')
         return
     
     def get_unclassified_example_mask(self, target: str) -> np.ndarray:
