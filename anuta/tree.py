@@ -308,7 +308,11 @@ class EntropyTreeLearner(TreeLearner):
             if not treepaths:
                 continue
 
-            leaf_assignments: h2o.H2OFrame = dtree.predict_leaf_node_assignment(self.examples, 'Node_ID')
+            try:
+                leaf_assignments: h2o.H2OFrame = dtree.predict_leaf_node_assignment(self.examples, 'Node_ID')
+            except Exception as e:
+                log.error(f"Failed to get leaf node assignments for {target}.")
+                continue
             leaf_df: pd.DataFrame = leaf_assignments.as_data_frame(use_multi_thread=True)
 
             #* Loop over each class's tree paths
@@ -346,7 +350,11 @@ class EntropyTreeLearner(TreeLearner):
                     ruleset = defaultdict(dict)
                     '''Collect leaf ranges for regression trees'''
                     dtree: H2ORandomForestEstimator = self.trees[target][treeidx]
-                    leaf_assignments = dtree.predict_leaf_node_assignment(self.examples, 'Node_ID')# 'Path')
+                    try:
+                        leaf_assignments = dtree.predict_leaf_node_assignment(self.examples, 'Node_ID')# 'Path')
+                    except Exception as e:
+                        log.error(f"Failed to get leaf node assignments for {target}.")
+                        continue
                     #* Bind leaf assignments with original target column
                     hf_leaf = self.examples.cbind(leaf_assignments)
                     leaf_col = leaf_assignments.columns[0]
