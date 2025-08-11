@@ -27,5 +27,7 @@ set -x
     # unzip data/meta.zip -d data/
     bash scripts/install_java.sh
 
+    echo "set -g history-limit 10000000" > ~/.tmux.conf
+
     exit 0
 }

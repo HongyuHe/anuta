@@ -491,7 +491,7 @@ class Mawi(Constructor):
             'tcp_window_size',
         ], inplace=True)
         columns_with_nan_mask = self.df.isna().any()
-        log.warning(f"Columns with missing values: {self.df.columns[columns_with_nan_mask].tolist()}")
+        log.warning(f"Fields with missing values: {self.df.columns[columns_with_nan_mask].tolist()}")
         df = self.df
         # Apply the normalization
         flow_keys = df.apply(normalize_pcap_5tuple, axis=1)
@@ -736,7 +736,10 @@ class Cidds001(Constructor):
         prior_rules: Set[str] = set()
         variables, self.categoricals, prior_rules, self.df = self.build_abstract_domain(
             variables, self.constants, self.df, drop_identifiers=False)
-                
+        #! Only consider the categorical variables for now.
+        self.df = self.df[self.categoricals]
+        variables = self.categoricals
+        
         domains = {}
         for name in self.df.columns:
             if name not in self.categoricals:

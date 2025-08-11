@@ -1,4 +1,5 @@
 import logging
+import sys
 from typing import *
 import sympy as sp
 import pandas as pd
@@ -11,16 +12,22 @@ from anuta.known import *
 true = sp.logic.true
 false = sp.logic.false
 
+class FlushStreamHandler(logging.StreamHandler):
+    def emit(self, record):
+        super().emit(record)
+        self.flush()
+
 log = logging.getLogger("anuta")
-handler = logging.StreamHandler()
-# handler.setLevel(logging.INFO)
+log.setLevel(logging.INFO)
+log.propagate = False  # Don't send to root
+
+handler = FlushStreamHandler(stream=sys.stdout)
 formatter = logging.Formatter(
     "[%(name)s @ %(asctime)s] %(levelname)-8s | %(message)s", 
-    datefmt="%H:%M:%S"  # Format to show only hour, minute, and second
+    datefmt="%H:%M:%S"
 )
 handler.setFormatter(formatter)
 log.addHandler(handler)
-log.setLevel(logging.INFO)
 
 
 #* Mapping Sympy to Z3 operators:

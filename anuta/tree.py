@@ -118,7 +118,7 @@ class EntropyTreeLearner(TreeLearner):
     """Tree learner based on information gain, using H2O's implementation."""
     def __init__(self, constructor: Constructor, limit=None):
         super().__init__(constructor, limit)
-        h2o.init(nthreads=-1)  # -1 = use all available cores
+        h2o.init(max_mem_size='2T', nthreads=-1)  # -1 = use all available cores
         h2o.no_progress()  # Disables all progress bar output
             
         self.examples: h2o.H2OFrame = h2o.H2OFrame(constructor.df)
@@ -178,14 +178,14 @@ class EntropyTreeLearner(TreeLearner):
         log.info(f"{self.__class__.__name__}: Training {self.total_treegroups} tree groups.")
         log.info(f"{len(self.examples)} examples and {len(self.features)} features ({len(self.categoricals)} categorical vars).")
         
-        max_reove_conquer_epochs = FLAGS.config.MAX_REMOVE_CONQUER_EPOCHS
+        max_sc_epochs = FLAGS.config.MAX_SEPARATE_CONQUER_EPOCHS
         epoch = 0
         new_rule_count = float('inf')
         new_rule_counts = []
-        while epoch < max_reove_conquer_epochs and new_rule_count > 0:
+        while epoch < max_sc_epochs and new_rule_count > 0:
             epoch += 1
             self.trees.clear()
-            print(f"\tEpochs {epoch}/{max_reove_conquer_epochs} of remove-and-conquer.")
+            print(f"\tEpochs {epoch}/{max_sc_epochs} of separate-and-conquer.")
             
             start = perf_counter()
             treeid = 1
@@ -219,7 +219,7 @@ class EntropyTreeLearner(TreeLearner):
                         treeid += 1
                     except Exception as e:
                         #* H2O lib is not very robust and can fail with various errors ...
-                        log.error(f"Failed to train tree for {target} with features {features}.")
+                        log.error(f"Failed to train tree for {target} with {len(features)} features.")
                         self.trees[target].append(None)
                         # exit(1)
                     print(f"... Trained {treeid}/{self.total_treegroups} ({treeid/self.total_treegroups:.1%}) tree groups.", end='\r')
@@ -274,6 +274,17 @@ class EntropyTreeLearner(TreeLearner):
             elif varname in self.categoricals:
                 assumptions.add(f"{varname} >= 0")
                 assumptions.add(f"{varname} <= {max(domain)}")
+                
+                if any(keyword in varname.lower() for keyword in ['pt', 'port']):
+                    #* Don't add negative assumptions for port variables.
+                    continue
+                full_domain = set(val for val in range(max(domain) + 1))
+                missing_values = full_domain - set(domain)
+                ne_predicates = []
+                for value in missing_values:
+                    ne_predicates.append(f"Ne({varname},{value})")
+                if ne_predicates:
+                    assumptions.add(' & '.join(ne_predicates))
             else:
                 assumptions.add(f"{varname} >= {domain[0]}")
                 assumptions.add(f"{varname} <= {domain[1]}")
