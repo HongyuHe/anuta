@@ -1,3 +1,4 @@
+import gc
 import math
 import h2o
 from h2o.estimators import H2ORandomForestEstimator
@@ -254,6 +255,10 @@ class EntropyTreeLearner(TreeLearner):
                     log.info(f"All examples for {target} are classified. Skipping.")
                     continue
                 log.info(f"{total_unclassified/self.examples.nrows:.1%} unclassified examples for {target}.")
+            
+            #* Remove all H2O models to free memory
+            h2o.remove_all()
+            gc.collect()
             
             print(f"\tTraining {self.total_treegroups} tree groups took {training_time:.2f} seconds.")
             print(f"\tExtracting rules took {extraction_time:.2f} seconds.")
