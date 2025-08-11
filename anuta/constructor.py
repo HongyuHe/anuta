@@ -628,9 +628,9 @@ class Netflix(Constructor):
         # self.df.to_csv('netflix_abstracted.csv', index=False)
         variables, self.categoricals, prior_rules, self.df = self.build_abstract_domain(
             variables, self.constants, self.df)
-        #! Only consider the categorical variables for now.
-        self.df = self.df[self.categoricals]
-        variables = self.categoricals
+        # #! Only consider the categorical variables for now.
+        # self.df = self.df[self.categoricals]
+        # variables = self.categoricals
         
         domains = {}
         for name in self.df.columns:
@@ -736,9 +736,9 @@ class Cidds001(Constructor):
         prior_rules: Set[str] = set()
         variables, self.categoricals, prior_rules, self.df = self.build_abstract_domain(
             variables, self.constants, self.df, drop_identifiers=False)
-        #! Only consider the categorical variables for now.
-        self.df = self.df[self.categoricals]
-        variables = self.categoricals
+        # #! Only consider the categorical variables for now.
+        # self.df = self.df[self.categoricals]
+        # variables = self.categoricals
         
         domains = {}
         for name in self.df.columns:

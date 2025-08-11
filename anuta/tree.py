@@ -118,7 +118,7 @@ class EntropyTreeLearner(TreeLearner):
     """Tree learner based on information gain, using H2O's implementation."""
     def __init__(self, constructor: Constructor, limit=None):
         super().__init__(constructor, limit)
-        h2o.init(max_mem_size='2T', nthreads=-1)  # -1 = use all available cores
+        h2o.init(max_mem_size=FLAGS.config.JVM_MEM, nthreads=-1)  # -1 = use all available cores
         h2o.no_progress()  # Disables all progress bar output
             
         self.examples: h2o.H2OFrame = h2o.H2OFrame(constructor.df)
