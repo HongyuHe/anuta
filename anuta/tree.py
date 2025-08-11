@@ -185,7 +185,6 @@ class EntropyTreeLearner(TreeLearner):
         new_rule_counts = []
         while epoch < max_sc_epochs and new_rule_count > 0:
             epoch += 1
-            self.trees.clear()
             print(f"\tEpochs {epoch}/{max_sc_epochs} of separate-and-conquer.")
             
             start = perf_counter()
@@ -257,7 +256,9 @@ class EntropyTreeLearner(TreeLearner):
                 log.info(f"{total_unclassified/self.examples.nrows:.1%} unclassified examples for {target}.")
             
             #* Remove all H2O models to free memory
-            h2o.remove_all()
+            # h2o.remove_all(retained=[self.examples.frame_id])
+            # h2o.rapids("(gc)")
+            self.trees.clear()
             gc.collect()
             
             print(f"\tTraining {self.total_treegroups} tree groups took {training_time:.2f} seconds.")
