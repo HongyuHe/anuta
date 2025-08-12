@@ -164,13 +164,17 @@ class EntropyTreeLearner(TreeLearner):
                 )
         #* dTypes: {'int', 'real', 'enum'(categorical)}
         self.dtypes = {varname: t for varname, t in self.examples.types.items()}
-        self.trees: Dict[str, List[H2ORandomForestEstimator]] = defaultdict(list)
+        self.target_trees: Dict[str, List[H2ORandomForestEstimator]] = defaultdict(list)
         #* Start with prior rules
         self.learned_rules: Set[str] = set(self.prior)  
-        #* {target: [{tree1_paths}, {tree2_paths}, ...]}
+        #* {target: [{cls_idx1: tree1_paths}, {cls_idx2: tree2_paths}, ...]}
         self.target_treepaths: Dict[str, List[Dict[str|int, Dict[str, Any]]]] = {}
-        self.target_remaining_idx: Dict[str, List[int]] = {
-            target: list(range(self.examples.nrows)) for target in self.categoricals}
+        #! Asssuming one treegroup per target variable!!!
+        # self.target_remaining_idx: Dict[str, List[int]] = {
+        #     target: list(range(self.examples.nrows)) for target in self.categoricals}
+        self.target_training_frame: Dict[str, h2o.H2OFrame] = {
+            target: self.examples for target in self.categoricals
+        }
         
         # # pprint(self.domains)
         # pprint(self.dtypes)
@@ -180,9 +184,14 @@ class EntropyTreeLearner(TreeLearner):
         log.info(f"{len(self.examples)} examples and {len(self.features)} features ({len(self.categoricals)} categorical vars).")
         
         max_sc_epochs = FLAGS.config.MAX_SEPARATE_CONQUER_EPOCHS
+        if max_sc_epochs > 1:
+            assert self.total_treegroups == self.examples.ncols,\
+                "Separate-and-conquer currently supports one tree per target variable."
         epoch = 0
         new_rule_count = float('inf')
         new_rule_counts = []
+        fully_calssified = []
+        unclassified_counts = [self.examples.nrows]
         while epoch < max_sc_epochs and new_rule_count > 0:
             epoch += 1
             print(f"\tEpochs {epoch}/{max_sc_epochs} of separate-and-conquer.")
@@ -190,6 +199,10 @@ class EntropyTreeLearner(TreeLearner):
             start = perf_counter()
             treeid = 1
             for target, feature_group in self.featuregroups.items():
+                if target in fully_calssified:
+                    log.info(f"Skipping training for {target}, already fully classified.")
+                    continue
+                
                 log.info(f"{target=}: {len(feature_group)} feature groups.")
                 print(f"... Trained {treeid}/{self.total_treegroups} ({treeid/self.total_treegroups:.1%}) tree groups.", end='\r')
                 if target in self.categoricals:
@@ -200,27 +213,21 @@ class EntropyTreeLearner(TreeLearner):
                         continue
                     params = self.model_configs['regression']
                 
+                #! Assuming one treegroup per target variable, otherwise they'd share the same frame!
+                training_frame = self.target_training_frame[target]
                 for i, features in enumerate(feature_group):
                     model_id = f"{target}_tree_{i+1}"
                     params['model_id'] = model_id
                     dtree = H2ORandomForestEstimator(**params)
-                    remaining_idx = self.target_remaining_idx[target]
-                    if not remaining_idx:
-                        #* All examples are classified for this target.
-                        self.trees[target].append(None)
-                        continue
                     
-                    training_frame = self.examples[remaining_idx, :]
-                    assert training_frame.nrows > 0, \
-                        f"{training_frame.nrows=} {remaining_idx=} for {target}."
                     try:
                         dtree.train(x=list(features), y=target, training_frame=training_frame)  
-                        self.trees[target].append(dtree)
+                        self.target_trees[target].append(dtree)
                         treeid += 1
                     except Exception as e:
                         #* H2O lib is not very robust and can fail with various errors ...
                         log.error(f"Failed to train tree for {target} with {len(features)} features.")
-                        self.trees[target].append(None)
+                        self.target_trees[target].append(None)
                         # exit(1)
                     print(f"... Trained {treeid}/{self.total_treegroups} ({treeid/self.total_treegroups:.1%}) tree groups.", end='\r')
             end = perf_counter()
@@ -235,41 +242,49 @@ class EntropyTreeLearner(TreeLearner):
             new_rule_counts.append(new_rule_count)
             print()
             
-            remaining = 0
+            total_unclassified = 0
             for target in self.categoricals:
-                if target not in self.trees:
+                if target in fully_calssified:
+                    log.info(f"Skipping {target}, already fully classified.")
+                    continue
+                if target not in self.target_trees:
                     log.warning(f"No trees trained for {target}. Skipping.")
                     continue
                 
-                #* Remove examples that are classified by any of the trees for this target
-                unclassified_mask = self.get_unclassified_example_mask(target)
-                total_unclassified = unclassified_mask.sum()
-                remaining += total_unclassified
-                remaining_idx = np.where(unclassified_mask)[0].tolist()
-                self.target_remaining_idx[target] = remaining_idx
+                #& Training frame of the next epoch is the unclassified examples of this epoch.
+                training_frame = self.get_unclassified_examples(target)
+                # h2o.remove(self.target_training_frame[target])
+                self.target_training_frame[target] = training_frame
+                num_unclassified = training_frame.nrows
+                total_unclassified += num_unclassified
                 
-                if total_unclassified == 0:
-                    assert len(remaining_idx) == 0, \
-                        f"Expected no unclassified examples for {target}, but {remaining_idx=}."
+                if num_unclassified == 0:
                     log.info(f"All examples for {target} are classified. Skipping.")
+                    fully_calssified.append(target)
                     continue
-                log.info(f"{total_unclassified/self.examples.nrows:.1%} unclassified examples for {target}.")
-            
+                log.info(f"{num_unclassified/self.examples.nrows:.1%} unclassified examples for {target}.")
+            unclassified_counts.append(total_unclassified)
             #* Remove all H2O models to free memory
-            # h2o.remove_all(retained=[self.examples.frame_id])
-            # h2o.rapids("(gc)")
-            self.trees.clear()
+            for trees in self.target_trees.values():
+                for model in trees:
+                    if model is not None:
+                        h2o.remove(model)
+            self.target_trees.clear()
             gc.collect()
             
             print(f"\tTraining {self.total_treegroups} tree groups took {training_time:.2f} seconds.")
             print(f"\tExtracting rules took {extraction_time:.2f} seconds.")
-            print(f"\tTotal remaining examples: {remaining}.")
+            print(f"\tFully classified targets: {fully_calssified}.")
+            # print(f"\tTotal unclassified examples: {total_unclassified}.")
             print(f"\tLearned {new_rule_count=} in epoch {epoch}.")
             print(f"\tTotal learned rules: {len(self.learned_rules)}.")
             print()
 
         log.info(f"Learning completed after {epoch} epochs.")
-        print(f"{new_rule_counts=}")
+        print(f"\t{fully_calssified=}")
+        print(f"\t{new_rule_counts=}")
+        print(f"\t{unclassified_counts=}")
+        
         assumptions = set()
         for varname, domain in self.domains.items():
             if '@' in varname:
@@ -300,43 +315,49 @@ class EntropyTreeLearner(TreeLearner):
         sprules = list(filter(lambda r: r not in (true, false), sprules))
         log.info(f"Total rules saved: {len(sprules)}")
         Theory.save_constraints(sprules, f'dt_{self.dataset}_{self.num_examples}_e{epoch}.pl')
+        h2o.shutdown(prompt=False)
         return
     
-    def get_unclassified_example_mask(self, target: str) -> np.ndarray:
-        n_rows = self.examples.nrows
+    def get_unclassified_examples(self, target: str) -> h2o.H2OFrame:
+        trees: List[H2ORandomForestEstimator] = self.target_trees.get(target, None)
+        assert len(trees) == 1, "Currently only supports one tree per target."
+        #TODO: Support multiple trees per target
+        dtree = trees[0]
+        if dtree is None:
+            log.warning(f"No tree trained for {target}. Skipping.")
+            #* Return an empty H2OFrame
+            return h2o.H2OFrame([])
+
+        frame: h2o.H2OFrame = self.target_training_frame[target]
+        n_rows = frame.nrows
+        try:
+            leaf_assignments: h2o.H2OFrame = dtree.predict_leaf_node_assignment(frame, 'Node_ID')
+        except Exception as e:
+            log.error(f"Failed to get leaf node assignments for {target}.")
+            return h2o.H2OFrame([])
+        leaf_df: pd.DataFrame = leaf_assignments.as_data_frame(use_multi_thread=True)
+
+        treepaths = self.target_treepaths.get(target, [])
         recognized_any = np.zeros(n_rows, dtype=bool)
+        #* Loop over each class's tree paths
+        for pathconditions in treepaths:
+            for idx, (cls_id, records) in enumerate(pathconditions.items()):
+                #! There could be a mismatch between cls_id ([0, 1, 3, 4]) and the index used by H2O.
+                leaf_col: str = leaf_assignments.columns[idx]
+                #* pathid: {class_id}-{node_id} or {class_id}-{path_suffix}
+                yes_leaf_ids = {int(rec['pathid'].split('-')[-1]) for rec in records}
+                if not yes_leaf_ids:
+                    continue
 
-        for dtree in self.trees[target]:
-            if dtree is None:
-                continue
-            
-            treepaths = self.target_treepaths.get(target, [])
-            if not treepaths:
-                continue
-
-            try:
-                leaf_assignments: h2o.H2OFrame = dtree.predict_leaf_node_assignment(self.examples, 'Node_ID')
-            except Exception as e:
-                log.error(f"Failed to get leaf node assignments for {target}.")
-                continue
-            leaf_df: pd.DataFrame = leaf_assignments.as_data_frame(use_multi_thread=True)
-
-            #* Loop over each class's tree paths
-            for pathconditions in treepaths:
-                for idx, (cls_id, records) in enumerate(pathconditions.items()):
-                    #! There could be a mismatch between class_id ([0, 1, 3, 4]) and the index used by H2O.
-                    leaf_col: str = leaf_assignments.columns[idx]
-                    #* pathid: {class_id}-{node_id} or {class_id}-{path_suffix}
-                    yes_leaf_ids = {int(rec['pathid'].split('-')[-1]) for rec in records}
-                    if not yes_leaf_ids:
-                        continue
-
-                    #* Rows recognized by this class tree
-                    yes_rows = leaf_df.index[leaf_df[leaf_col].isin(yes_leaf_ids)]
-                    recognized_any[yes_rows] = True
-
-        #* Invert so True means NOT recognized by any of the trees for this target
-        return ~recognized_any
+                #* Rows recognized by this class tree
+                yes_rows = leaf_df.index[leaf_df[leaf_col].isin(yes_leaf_ids)]
+                recognized_any[yes_rows] = True
+        
+        unclassified_mask = ~recognized_any
+        remaining_idx = np.where(unclassified_mask)[0].tolist()
+        unclassified_training_samples = frame[remaining_idx, :]
+        
+        return unclassified_training_samples
         
     def extract_rules_from_treepaths(self) -> Set[str]:
         self.extract_target_treepaths()
@@ -355,7 +376,7 @@ class EntropyTreeLearner(TreeLearner):
                 else:
                     ruleset = defaultdict(dict)
                     '''Collect leaf ranges for regression trees'''
-                    dtree: H2ORandomForestEstimator = self.trees[target][treeidx]
+                    dtree: H2ORandomForestEstimator = self.target_trees[target][treeidx]
                     try:
                         leaf_assignments = dtree.predict_leaf_node_assignment(self.examples, 'Node_ID')# 'Path')
                     except Exception as e:
@@ -536,7 +557,7 @@ class EntropyTreeLearner(TreeLearner):
     def extract_target_treepaths(self):
         """Extract path conditions from all trees."""
         target_treepaths = defaultdict(list)
-        for target, trees in self.trees.items():
+        for target, trees in self.target_trees.items():
             for treeidx, dtree in enumerate(tqdm(
                 trees, desc=f"Extracting tree paths for {target}"
             )):

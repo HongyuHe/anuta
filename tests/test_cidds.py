@@ -37,7 +37,7 @@ def theory() -> Theory:
     # modelpath = 'xgb_cidds_1000.pl'
     # modelpath = 'dt_cidds_1000.pl'
     # modelpath = 'dt_cidds_10000.pl'
-    modelpath = 'dt_cidds_all_e1.pl'
+    modelpath = 'dt_cidds_all_e4.pl'
     # modelpath = 'hmine_cidds_all.pl'
     # modelpath = 'xgb_cidds_all.pl'
     # modelpath = 'lgbm_cidds_all.pl'
