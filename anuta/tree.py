@@ -215,6 +215,11 @@ class EntropyTreeLearner(TreeLearner):
                 
                 #! Assuming one treegroup per target variable, otherwise they'd share the same frame!
                 training_frame = self.target_training_frame[target]
+                if len(training_frame[target].unique()) <= 1:
+                    log.info(f"All examples for {target} have the target same value. Skipping.")
+                    fully_calssified.append(target)
+                    continue
+                
                 for i, features in enumerate(feature_group):                    
                     treeid += 1
                     model_id = f"{target}_tree_{i+1}"
