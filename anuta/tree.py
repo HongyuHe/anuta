@@ -215,7 +215,8 @@ class EntropyTreeLearner(TreeLearner):
                 
                 #! Assuming one treegroup per target variable, otherwise they'd share the same frame!
                 training_frame = self.target_training_frame[target]
-                for i, features in enumerate(feature_group):
+                for i, features in enumerate(feature_group):                    
+                    treeid += 1
                     model_id = f"{target}_tree_{i+1}"
                     params['model_id'] = model_id
                     dtree = H2ORandomForestEstimator(**params)
@@ -223,12 +224,12 @@ class EntropyTreeLearner(TreeLearner):
                     try:
                         dtree.train(x=list(features), y=target, training_frame=training_frame)  
                         self.target_trees[target].append(dtree)
-                        treeid += 1
                     except Exception as e:
-                        #* H2O lib is not very robust and can fail with various errors ...
-                        log.error(f"Failed to train tree for {target} with {len(features)} features.")
+                        #* H2O lib could fail to train a tree (e.g., if all values are the same, frame too small, etc.)
+                        log.warning(f"Couldn't train tree for {target} with {len(features)} features.")
                         self.target_trees[target].append(None)
-                        # exit(1)
+                        
+                    print(f"... Trained {treeid}/{self.total_treegroups} ({treeid/self.total_treegroups:.1%}) tree groups.", end='\r')
                     print(f"... Trained {treeid}/{self.total_treegroups} ({treeid/self.total_treegroups:.1%}) tree groups.", end='\r')
             end = perf_counter()
             training_time = end - start
@@ -262,7 +263,9 @@ class EntropyTreeLearner(TreeLearner):
                     log.info(f"All examples for {target} are classified. Skipping.")
                     fully_calssified.append(target)
                     continue
-                log.info(f"{num_unclassified/self.examples.nrows:.1%} unclassified examples for {target}.")
+                log.info(f"{num_unclassified/self.examples.nrows:.3%} unclassified examples for {target}.")
+            
+            classified_more = unclassified_counts[-1] - total_unclassified
             unclassified_counts.append(total_unclassified)
             #* Remove all H2O models to free memory
             for trees in self.target_trees.values():
@@ -275,10 +278,14 @@ class EntropyTreeLearner(TreeLearner):
             print(f"\tTraining {self.total_treegroups} tree groups took {training_time:.2f} seconds.")
             print(f"\tExtracting rules took {extraction_time:.2f} seconds.")
             print(f"\tFully classified targets: {fully_calssified}.")
-            # print(f"\tTotal unclassified examples: {total_unclassified}.")
+            print(f"\t{classified_more} more examples classified.")
             print(f"\tLearned {new_rule_count=} in epoch {epoch}.")
             print(f"\tTotal learned rules: {len(self.learned_rules)}.")
             print()
+            
+            if classified_more == 0:
+                log.info(f"No additional examples classified in epoch {epoch}. Stopping.")
+                break
 
         log.info(f"Learning completed after {epoch} epochs.")
         print(f"\t{fully_calssified=}")
