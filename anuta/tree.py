@@ -170,8 +170,8 @@ class EntropyTreeLearner(TreeLearner):
         #* {target: [{cls_idx1: tree1_paths}, {cls_idx2: tree2_paths}, ...]}
         self.target_treepaths: Dict[str, List[Dict[str|int, Dict[str, Any]]]] = {}
         #! Asssuming one treegroup per target variable!!!
-        # self.target_remaining_idx: Dict[str, List[int]] = {
-        #     target: list(range(self.examples.nrows)) for target in self.categoricals}
+        self.target_unclassified_idxset: Dict[str, Set[int]] = {
+            target: set(range(self.examples.nrows)) for target in self.categoricals}
         self.target_training_frame: Dict[str, h2o.H2OFrame] = {
             target: self.examples for target in self.categoricals
         }
@@ -340,10 +340,11 @@ class EntropyTreeLearner(TreeLearner):
             #* Return an empty H2OFrame
             return h2o.H2OFrame([])
 
-        frame: h2o.H2OFrame = self.target_training_frame[target]
-        n_rows = frame.nrows
+        # frame: h2o.H2OFrame = self.target_training_frame[target]
+        n_rows = self.examples.nrows
         try:
-            leaf_assignments: h2o.H2OFrame = dtree.predict_leaf_node_assignment(frame, 'Node_ID')
+            #! Here, we should use ALL examples, not just the remaining ones.
+            leaf_assignments: h2o.H2OFrame = dtree.predict_leaf_node_assignment(self.examples, 'Node_ID')
         except Exception as e:
             log.error(f"Failed to get leaf node assignments for {target}.")
             return h2o.H2OFrame([])
@@ -367,9 +368,15 @@ class EntropyTreeLearner(TreeLearner):
         
         unclassified_mask = ~recognized_any
         remaining_idx = np.where(unclassified_mask)[0].tolist()
-        unclassified_training_samples = frame[remaining_idx, :]
         
-        return unclassified_training_samples
+        #* Take the intersect with the example indices of the previous epoch
+        training_idxset = self.target_unclassified_idxset[target]
+        unclassified_idx = [idx for idx in remaining_idx if idx in training_idxset]
+        unclassified_samples = self.examples[unclassified_idx, :]
+        #* Update the index set for the next epoch
+        self.target_unclassified_idxset[target] = set(unclassified_idx)
+        
+        return unclassified_samples
         
     def extract_rules_from_treepaths(self) -> Set[str]:
         self.extract_target_treepaths()
