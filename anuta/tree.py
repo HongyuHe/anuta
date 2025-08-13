@@ -170,8 +170,8 @@ class EntropyTreeLearner(TreeLearner):
         #* {target: [{cls_idx1: tree1_paths}, {cls_idx2: tree2_paths}, ...]}
         self.target_treepaths: Dict[str, List[Dict[str|int, Dict[str, Any]]]] = {}
         #! Asssuming one treegroup per target variable!!!
-        self.target_unclassified_idxset: Dict[str, Set[int]] = {
-            target: set(range(self.examples.nrows)) for target in self.categoricals}
+        # self.target_unclassified_idxset: Dict[str, Set[int]] = {
+        #     target: set(range(self.examples.nrows)) for target in self.categoricals}
         self.target_training_frame: Dict[str, h2o.H2OFrame] = {
             target: self.examples for target in self.categoricals
         }
@@ -191,7 +191,7 @@ class EntropyTreeLearner(TreeLearner):
         new_rule_count = float('inf')
         new_rule_counts = []
         fully_calssified = []
-        unclassified_counts = [self.examples.nrows]
+        unclassified_counts = [self.examples.nrows*len(self.categoricals)]
         while epoch < max_sc_epochs and new_rule_count > 0:
             epoch += 1
             print(f"\tEpochs {epoch}/{max_sc_epochs} of separate-and-conquer.")
@@ -227,7 +227,9 @@ class EntropyTreeLearner(TreeLearner):
                 
                 for i, features in enumerate(feature_group):                    
                     treeid += 1
-                    model_id = f"{target}_tree_{i+1}"
+                    #* Special symbols in model_id could cause issues when deleting related objects in H2O.
+                    # model_id = f"'{target}_tree_{i+1}'"
+                    model_id = f"tree_{i+1}"
                     params['model_id'] = model_id
                     dtree = H2ORandomForestEstimator(**params)
                     
@@ -264,7 +266,6 @@ class EntropyTreeLearner(TreeLearner):
                 
                 #& Training frame of the next epoch is the unclassified examples of this epoch.
                 training_frame = self.get_unclassified_examples(target)
-                # h2o.remove(self.target_training_frame[target])
                 self.target_training_frame[target] = training_frame
                 num_unclassified = training_frame.nrows
                 total_unclassified += num_unclassified
@@ -283,6 +284,7 @@ class EntropyTreeLearner(TreeLearner):
                     if model is not None:
                         h2o.remove(model)
             self.target_trees.clear()
+            # self.target_treepaths.clear()
             gc.collect()
             
             print(f"\tTraining {self.total_treegroups} tree groups took {training_time:.2f} seconds.")
@@ -345,11 +347,12 @@ class EntropyTreeLearner(TreeLearner):
             #* Return an empty H2OFrame
             return h2o.H2OFrame([])
 
-        # frame: h2o.H2OFrame = self.target_training_frame[target]
-        n_rows = self.examples.nrows
+        frame: h2o.H2OFrame = self.target_training_frame[target]
+        n_rows = frame.nrows
         try:
-            #! Here, we should use ALL examples, not just the remaining ones.
-            leaf_assignments: h2o.H2OFrame = dtree.predict_leaf_node_assignment(self.examples, 'Node_ID')
+            # #! Here, we should use ALL examples, not just the remaining ones.
+            # leaf_assignments: h2o.H2OFrame = dtree.predict_leaf_node_assignment(self.examples, 'Node_ID')
+            leaf_assignments: h2o.H2OFrame = dtree.predict_leaf_node_assignment(frame, 'Node_ID')
         except Exception as e:
             log.error(f"Failed to get leaf node assignments for {target}.")
             return h2o.H2OFrame([])
@@ -374,13 +377,15 @@ class EntropyTreeLearner(TreeLearner):
         unclassified_mask = ~recognized_any
         remaining_idx = np.where(unclassified_mask)[0].tolist()
         
-        #* Take the intersect with the example indices of the previous epoch
-        training_idxset = self.target_unclassified_idxset[target]
-        unclassified_idx = [idx for idx in remaining_idx if idx in training_idxset]
-        unclassified_samples = self.examples[unclassified_idx, :]
-        #* Update the index set for the next epoch
-        self.target_unclassified_idxset[target] = set(unclassified_idx)
+        # #* Take the intersect with the example indices of the previous epoch
+        # training_idxset = self.target_unclassified_idxset[target]
+        # unclassified_idx = [idx for idx in remaining_idx if idx in training_idxset]
+        # unclassified_samples = self.examples[unclassified_idx, :]
+        # #* Update the index set for the next epoch
+        # self.target_unclassified_idxset[target] = set(unclassified_idx)
         
+        unclassified_samples = frame[remaining_idx, :]
+        h2o.remove(leaf_assignments)
         return unclassified_samples
         
     def extract_rules_from_treepaths(self) -> Set[str]:
@@ -421,6 +426,9 @@ class EntropyTreeLearner(TreeLearner):
                         row[leaf_id_col]: {'min': row[min_col], 'max': row[max_col]}
                         for _, row in leaf_stats_df.iterrows()
                     }
+                    h2o.remove(leaf_assignments)
+                    h2o.remove(hf_leaf)
+                    h2o.remove(leaf_stats)
 
                 for targetcls, records in pathconditions.items():
                     for record in records:
@@ -663,7 +671,7 @@ class EntropyTreeLearner(TreeLearner):
                 htree = H2OTree(model=dtree, tree_number=0)
                 recurse(htree.root_node, [], "", 0)
             except Exception as e:
-                log.error(f"Failed to extract paths from tree ({target=} {dtree._parms=})")
+                log.error(f"Failed to extract paths from tree ({target=})")
             if paths:
                 treepaths[0] = paths
         
