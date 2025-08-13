@@ -22,8 +22,8 @@ def run_evaluation(possitive_cases: List[Dict[str, str]],
     print(f"🔍 Results for {theory.path_to_constraints}")
     print("=" * 60 + "\033[0m")
 
-    print(f"\033[1m🛡️\tCoverage:\033[0m     {coverage:.3f}")
-    print(f"\033[1m🎯\tSpecificity:\033[0m  {specificity:.3f}")
+    print(f"\033[1m🛡️\tCoverage:\033[0m     {coverage:.3f} (TP: {tp_count}/{tp_count+fn_count})")
+    print(f"\033[1m🎯\tSpecificity:\033[0m  {specificity:.3f} (TN: {tn_count}/{tn_count+fp_count})")
     print(f"\033[1m✅\tAccuracy:\033[0m     {accuracy:.3f} ({tp_count+tn_count}/{tp_count+fn_count+tn_count+fp_count})")
 
     print("\033[1;32m" + "=" * 60 + "\033[0m\n")
