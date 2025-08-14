@@ -229,7 +229,7 @@ class EntropyTreeLearner(TreeLearner):
                     treeid += 1
                     #* Special symbols in model_id could cause issues when deleting related objects in H2O.
                     # model_id = f"'{target}_tree_{i+1}'"
-                    model_id = f"tree_{i+1}"
+                    model_id = f"tree{treeid}_feature{i}"
                     params['model_id'] = model_id
                     dtree = H2ORandomForestEstimator(**params)
                     
@@ -253,6 +253,10 @@ class EntropyTreeLearner(TreeLearner):
             end = perf_counter()
             extraction_time = end - start
             new_rule_counts.append(new_rule_count)
+            if new_rule_count == 0:
+                log.info(f"No new rules learned in epoch {epoch}. Stopping.")
+                unclassified_counts.append(unclassified_counts[-1])
+                break
             print()
             
             total_unclassified = 0
@@ -384,9 +388,9 @@ class EntropyTreeLearner(TreeLearner):
         # #* Update the index set for the next epoch
         # self.target_unclassified_idxset[target] = set(unclassified_idx)
         
-        unclassified_samples = frame[remaining_idx, :]
+        unclassified_examples = frame[remaining_idx, :]
         h2o.remove(leaf_assignments)
-        return unclassified_samples
+        return unclassified_examples
         
     def extract_rules_from_treepaths(self) -> Set[str]:
         self.extract_target_treepaths()
