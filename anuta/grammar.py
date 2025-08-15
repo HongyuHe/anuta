@@ -73,14 +73,14 @@ class VariableType(Enum):
 TYPE_DOMIAN = {
     VariableType.IP: DomainType.CATEGORICAL,
     VariableType.PORT: DomainType.CATEGORICAL,
+    VariableType.PROTO: DomainType.CATEGORICAL, 
+    VariableType.FLAG: DomainType.CATEGORICAL,
     VariableType.SEQUENCING: DomainType.NUMERICAL,
     VariableType.SIZE: DomainType.NUMERICAL,
     # VariableType.HEADER_LENGTH: DomainType.NUMERICAL,
-    VariableType.FLAG: DomainType.CATEGORICAL,
     VariableType.POINTER: DomainType.NUMERICAL,
     VariableType.WINDOW: DomainType.NUMERICAL,
     VariableType.TIME: DomainType.NUMERICAL,
-    VariableType.PROTO: DomainType.CATEGORICAL, 
     VariableType.TTL: DomainType.NUMERICAL,
     VariableType.UNKNOWN: "unknown"
 }

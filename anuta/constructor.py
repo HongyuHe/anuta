@@ -147,12 +147,13 @@ class Constructor(object):
             for i, var1 in enumerate(numericals):
                 for var2 in numericals[i+1:]:
                     if var1 == var2: continue
-                    avar = f"{var1}$*${var2}"
-                    avars.add(avar)
-                    variable_types[avar] = vtype
                     avar = f"{var1}$+${var2}"
                     avars.add(avar)
                     variable_types[avar] = vtype
+                    if vtype == VariableType.WINDOW:
+                        avar = f"{var1}$*${var2}"
+                        avars.add(avar)
+                        variable_types[avar] = vtype
         
         # pprint(avars)
         log.info(f"Created {len(avars)} abstract vars.")
@@ -203,6 +204,7 @@ class Constructor(object):
                 lhs_vars = set()
                 rhs_vars = set()
                 
+                #! Assuming LHS is a single variable.
                 assert '$' not in var1, f"LHS var {var1} shouldn't be augmented."
                 lhs = var1
                 lhs_vars.add(lhs)
@@ -251,18 +253,23 @@ class Constructor(object):
                     
                     if rhs not in adf.columns:
                         if op2 == '+':
-                            adf[rhs] = const+adf[v2] if const else adf[v1]+adf[v2]
+                            rhs_values = const+adf[v2] if const else adf[v1]+adf[v2]
                         elif op2 == '*':
-                            adf[rhs] = const*adf[v2] if const else adf[v1]*adf[v2]
-                    # if adf[rhs].nunique() <= 1:
-                    #     #* Skip abstract variables with only one unique value.
-                    #     skipped.add(rhs)
-                    #     # log.info(f"Skipping abstract {rhs=} with only one unique value.")
-                    #     continue
+                            rhs_values = const*adf[v2] if const else adf[v1]*adf[v2]
+                        else:
+                            raise ValueError(f"Unknown operator {op2} in {var2}.")
+                        if rhs_values.nunique() <= 1:
+                            #* Skip abstract variables with only one unique value.
+                            # log.info(f"Skipping abstract {rhs=} with only one unique value.")
+                            continue
+                        else:
+                            adf[rhs] = rhs_values
                 
                 if lhs_vars & rhs_vars:
                     #* Don't generate predicates with overlapping variables.
                     continue
+                
+                '''Generating abstract predicates.'''
                 #& Equality predicates: Eq(A,B)
                 predicate = f"@Eq({lhs},{rhs})@"
                 if predicate not in adf.columns:
@@ -291,10 +298,12 @@ class Constructor(object):
                         log.warning(f"Duplicated {predicate=}.")
                         
                     if predicate_values.nunique() > 1:
-                        adf[predicate] = predicate_values
-                        abstract_predicates.add(predicate)
-                        categoricals.append(predicate)
-                        self.colvars[predicate].update(lhs_vars | rhs_vars)
+                        #! Omit A>B for now for scalability.
+                        pass
+                        # adf[predicate] = predicate_values
+                        # abstract_predicates.add(predicate)
+                        # categoricals.append(predicate)
+                        # self.colvars[predicate].update(lhs_vars | rhs_vars)
                     else:
                         predicate = predicate.replace('@', '')
                         if predicate_values.iloc[0] == 0:

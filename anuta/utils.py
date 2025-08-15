@@ -23,7 +23,7 @@ log.propagate = False  # Don't send to root
 
 handler = FlushStreamHandler(stream=sys.stdout)
 formatter = logging.Formatter(
-    "[%(name)s @ %(asctime)s] %(levelname)-8s | %(message)s", 
+    "[%(name)s @ %(asctime)s] %(levelname)-7s | %(message)s", 
     datefmt="%H:%M:%S"
 )
 handler.setFormatter(formatter)

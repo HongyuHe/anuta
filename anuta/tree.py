@@ -229,7 +229,7 @@ class EntropyTreeLearner(TreeLearner):
                     treeid += 1
                     #* Special symbols in model_id could cause issues when deleting related objects in H2O.
                     # model_id = f"'{target}_tree_{i+1}'"
-                    model_id = f"tree{treeid}_feature{i}"
+                    model_id = f"tree{treeid}_featuregroup{i}"
                     params['model_id'] = model_id
                     dtree = H2ORandomForestEstimator(**params)
                     
@@ -293,7 +293,7 @@ class EntropyTreeLearner(TreeLearner):
             
             print(f"\tTraining {self.total_treegroups} tree groups took {training_time:.2f} seconds.")
             print(f"\tExtracting rules took {extraction_time:.2f} seconds.")
-            print(f"\tFully classified targets: {fully_calssified}.")
+            print(f"\tFully classified {len(fully_calssified)} targets.")
             print(f"\t{classified_more} more examples classified.")
             print(f"\tLearned {new_rule_count=} in epoch {epoch}.")
             print(f"\tTotal learned rules: {len(self.learned_rules)}.")
