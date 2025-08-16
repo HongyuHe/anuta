@@ -526,8 +526,12 @@ class LogicLearner(object):
         log.info(f"Created {len(prior_rules)} prior rules. First a few:")
         pprint(list(prior_rules)[:5])
         
-        constraint_predicates = {Constraint(sp.sympify(p)) for p in predicates 
-                                    if p not in [sp.true, sp.false]}
+        constraint_predicates = set()
+        for p in tqdm(predicates, desc="... Converting predicates to constraints"):
+            if p not in [sp.true, sp.false]:
+                p = Constraint(sp.sympify(p))
+                constraint_predicates.add(p)
+        
         assert len(constraint_predicates) == len(predicates), \
             f"Duplicate predicates found: {len(predicates) - len(constraint_predicates)}"
         
