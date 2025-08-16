@@ -32,7 +32,8 @@ class Constraint(object):
         # self.rank: int = None
         # self.maxrank: int = None
         #* Use the syntactic theory to identify the constraint.
-        self.id = hash(sp.srepr(clausify(self.expr)))
+        self.canonical = sp.srepr(clausify(expr))
+        self.id = hash(self.canonical)
         
     def __hash__(self) -> int:
         #* Define the identity of the constraint for easy set operations.
@@ -40,7 +41,7 @@ class Constraint(object):
     
     def __eq__(self, another: 'Constraint') -> bool:
         assert isinstance(another, Constraint), "Can only compare with another 'Constraint'."
-        return self.id == another.id
+        return self.canonical == another.canonical
     
     def __repr__(self) -> str:
         return f"Constraint: {self.expr}"

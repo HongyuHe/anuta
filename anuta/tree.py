@@ -304,7 +304,7 @@ class EntropyTreeLearner(TreeLearner):
                 break
 
         log.info(f"Learning completed after {epoch} epochs.")
-        print(f"\t{fully_calssified=}")
+        # print(f"\t{fully_calssified=}")
         print(f"\t{new_rule_counts=}")
         print(f"\t{unclassified_counts=}")
         

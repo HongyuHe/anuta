@@ -326,4 +326,4 @@ def load_constraints(fname: str='constraints') -> List[sp.Expr]:
     return constraints
 
 def clausify(expr: sp.Expr) -> sp.Expr:
-    return sp.simplify_logic(expr, form='dnf', deep=True)
+    return sp.simplify(expr, form='dnf', deep=True)

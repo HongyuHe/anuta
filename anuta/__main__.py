@@ -20,6 +20,7 @@ from anuta.tree import EntropyTreeLearner, XgboostTreeLearner, LightGbmTreeLearn
 from anuta.association import AssociationRuleLearner
 from anuta.theory import Theory
 from anuta.miner import miner_versionspace, miner_valiant, validator
+from anuta.logic import LogicLearner
 from anuta.utils import log
 from anuta.cli import FLAGS
 
@@ -47,7 +48,10 @@ def main(constructor: Constructor, refconstructor: Constructor, limit: int):
     elif FLAGS.baseline:
         miner_valiant(constructor, limit)
     else:
-        miner_versionspace(constructor, refconstructor, limit)
+        # miner_versionspace(constructor, refconstructor, limit)
+        learner = LogicLearner(constructor, limit=limit)
+        log.info("Learning constraints using logic programming...")
+        learner.learn()
 
 if __name__ == '__main__':
     FLAGS(sys.argv)
@@ -85,27 +89,27 @@ if __name__ == '__main__':
     if FLAGS.learn:
         refdata = FLAGS.ref
         refconstructor = None
-        if not FLAGS.tree and not FLAGS.assoc:
-            if not refdata:
-                match dataset:
-                    case 'cidds':
-                        refdata = "data/cidds_wk4_all.csv"
-                        refconstructor = Cidds001(refdata)
-                    case 'netflix':
-                        refdata = "data/netflix.csv"
-                        refconstructor = Netflix(refdata)
-                    case 'cicids':
-                        refdata = "data/cicids_friday_normal.csv"
-                        refconstructor = Cicids2017(refdata)
-            else:
-                refconstructor = Cidds001(refdata) \
-                    if dataset == 'cidds' else Netflix(refdata)
+        # if not FLAGS.tree and not FLAGS.assoc:
+        #     if not refdata:
+        #         match dataset:
+        #             case 'cidds':
+        #                 refdata = "data/cidds_wk4_all.csv"
+        #                 refconstructor = Cidds001(refdata)
+        #             case 'netflix':
+        #                 refdata = "data/netflix_pcap.csv"
+        #                 refconstructor = Netflix(refdata)
+        #             case 'cicids':
+        #                 refdata = "data/cicids_friday_normal.csv"
+        #                 refconstructor = Cicids2017(refdata)
+        #     else:
+        #         refconstructor = Cidds001(refdata) \
+        #             if dataset == 'cidds' else Netflix(refdata)
             
-        log.info(f"Learning from {limit} examples in {FLAGS.data}")
-        # log.info(f"Domain counting enabled: {FLAGS.config.DOMAIN_COUNTING}")
-        # log.info(f"Using baseline method: {FLAGS.baseline}")
-        if refconstructor:
-            log.info(f"Reference data: {refdata}")     
+        # log.info(f"Learning from {limit} examples in {FLAGS.data}")
+        # # log.info(f"Domain counting enabled: {FLAGS.config.DOMAIN_COUNTING}")
+        # # log.info(f"Using baseline method: {FLAGS.baseline}")
+        # if refconstructor:
+        #     log.info(f"Reference data: {refdata}")     
         
         main(constructor, refconstructor, limit)
 

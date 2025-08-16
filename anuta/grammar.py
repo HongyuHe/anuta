@@ -47,7 +47,7 @@ class DomainType(Enum):
 class Domain:
     kind: DomainType
     bounds: Bounds
-    values: List[Enum]
+    values: List[int]
 
 class Operator(Enum):
     NOP = 0

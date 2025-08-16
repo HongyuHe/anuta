@@ -632,11 +632,13 @@ class Netflix(Constructor):
                     kind=ConstantType.LIMIT,
                     values=netflix_tcplen_limits
                 )
+                
+        prior_rules = []
         # variables, self.categoricals, self.df = self.build_abstract_domain(
         #     variables, self.constants, self.categoricals, self.df)
         # self.df.to_csv('netflix_abstracted.csv', index=False)
-        variables, self.categoricals, prior_rules, self.df = self.build_abstract_domain(
-            variables, self.constants, self.df)
+        # variables, self.categoricals, prior_rules, self.df = self.build_abstract_domain(
+        #     variables, self.constants, self.df)
         # #! Only consider the categorical variables for now.
         # self.df = self.df[self.categoricals]
         # variables = self.categoricals
@@ -716,6 +718,7 @@ class Cidds001(Constructor):
         self.categoricals = cidds_categoricals
         
         #* Add the constants associated with the vars.
+        #! One variable currently has only one type of constants.
         self.constants: dict[str, Constants] = {}
         for name in variables:
             if 'ip' in name.lower():
@@ -743,8 +746,8 @@ class Cidds001(Constructor):
                 )
         
         prior_rules: Set[str] = set()
-        variables, self.categoricals, prior_rules, self.df = self.build_abstract_domain(
-            variables, self.constants, self.df, drop_identifiers=False)
+        # variables, self.categoricals, prior_rules, self.df = self.build_abstract_domain(
+        #     variables, self.constants, self.df, drop_identifiers=False)
         # #! Only consider the categorical variables for now.
         # self.df = self.df[self.categoricals]
         # variables = self.categoricals
