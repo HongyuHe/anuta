@@ -486,6 +486,15 @@ class LogicLearner(object):
         #^ End for j, lhs in enumerate(self.variables)
         
         '''Add domain constraints to prior rules.'''
+        #* First drop identifiers
+        identifiers = typed_variables[VariableType.IP]+typed_variables[VariableType.PORT]
+        self.examples.drop(columns=identifiers, inplace=True)
+        for var in identifiers:
+            if var in self.variables:
+                self.variables.remove(var)
+            if var in self.categoricals:
+                self.categoricals.remove(var)
+                
         for varname in self.variables:
             domaintype = TYPE_DOMIAN[variable_types[varname]]
             if domaintype == DomainType.NUMERICAL:
