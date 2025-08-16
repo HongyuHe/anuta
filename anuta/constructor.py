@@ -537,11 +537,15 @@ class Mawi(Constructor):
                     values=netflix_tcplen_limits
                 )
 
-        variables, self.categoricals, prior_rules, self.df = self.build_abstract_domain(
-            variables, self.constants, self.df)
-        #! Only consider the categorical variables for now.
-        self.df = self.df[self.categoricals]
-        variables = self.categoricals
+        prior_rules = set()
+        # variables, self.categoricals, prior_rules, self.df = self.build_abstract_domain(
+        #     variables, self.constants, self.df)
+        # #! Only consider the categorical variables for now.
+        # self.df = self.df[self.categoricals]
+        # variables = self.categoricals
+        
+        _, grouped_vars = group_variables_by_type(variables)
+        self.categoricals = grouped_vars[DomainType.CATEGORICAL]
         
         domains = {}
         for name in self.df.columns:
@@ -614,10 +618,10 @@ class Netflix(Constructor):
         self.df = generate_sliding_windows(self.df, stride=STRIDE, window=WINDOW)
         
         variables = list(self.df.columns)
-        self.categoricals = []
-        for name in self.df.columns:
-            if any(keyword in name.lower() for keyword in ('src', 'dst', 'proto', 'flags')):
-                self.categoricals.append(name)
+        # self.categoricals = []
+        # for name in self.df.columns:
+        #     if any(keyword in name.lower() for keyword in ('src', 'dst', 'proto', 'flags')):
+        #         self.categoricals.append(name)
         # print(f"Categorical variables: {self.categoricals}")
         
         self.constants: dict[str, Constants] = {}
@@ -642,6 +646,9 @@ class Netflix(Constructor):
         # #! Only consider the categorical variables for now.
         # self.df = self.df[self.categoricals]
         # variables = self.categoricals
+        
+        _, grouped_vars = group_variables_by_type(variables)
+        self.categoricals = grouped_vars[DomainType.CATEGORICAL]
         
         domains = {}
         for name in self.df.columns:
