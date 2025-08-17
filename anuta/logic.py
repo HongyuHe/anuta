@@ -10,6 +10,7 @@ import sympy as sp
 from dataclasses import dataclass
 from enum import Enum, auto
 from rich import print as pprint
+import pickle
 import warnings
 
 from tqdm import tqdm
@@ -127,14 +128,14 @@ class LogicLearner(object):
         # Precompute each evidence set as a list to iterate deterministically
         E_list: List[List[Constraint]] = [list(E) for E in evidence_sets]
 
-        # Optional predicate ordering: higher coverage first (helps pruning)
+        # Optional predicate ordering: higher coverage first (helps pruning) [Chu et al., VLDB '13]
         pred_by_cov = sorted(idx_by_pred.items(), key=lambda kv: -len(kv[1]))
         pred_order = [p for p, _ in pred_by_cov]
 
         solutions: List[frozenset[Constraint]] = []
 
         # Quick helper: prune if chosen is a superset of an existing minimal solution.
-        def dominated_by_existing(chosen: Set[Constraint]) -> bool:
+        def _dominated_by_existing(chosen: Set[Constraint]) -> bool:
             fc = frozenset(chosen)
             for sol in solutions:
                 # if chosen is a superset of a found minimal solution, it can’t be minimal
@@ -145,18 +146,18 @@ class LogicLearner(object):
         # Check coverage
         FULL = set(range(len(E_list)))
 
-        def covered_indices(chosen: Set[Constraint]) -> Set[int]:
-            covered = set()
-            for p in chosen:
-                covered |= idx_by_pred[p]
-            return covered
+        # def _covered_indices(chosen: Set[Constraint]) -> Set[int]:
+        #     covered = set()
+        #     for p in chosen:
+        #         covered |= idx_by_pred[p]
+        #     return covered
 
-        # Optimistic bound on remaining picks:
+        #* Optimistic bound on remaining picks:
         # If we still need to cover R uncovered evidences, and the best single predicate
         # can cover at most M of them, then we need at least ceil(|R|/M) more predicates.
         # If chosen_size + that lower bound > max_size, prune.
         # (Simple but effective for a BnB cut.)
-        def optimistic_lb(uncovered: Set[int]) -> int:
+        def _optimistic_lb(uncovered: Set[int]) -> int:
             if not uncovered:
                 return 0
             best_gain = 0
@@ -169,7 +170,7 @@ class LogicLearner(object):
             return 1 if best_gain == 0 else ( (len(uncovered) + best_gain - 1) // best_gain )
 
         # Choose an uncovered evidence with the fewest candidates (fail-first)
-        def pick_uncovered_with_smallest_branch(uncovered: Set[int], chosen: Set[Constraint]) -> int:
+        def _pick_uncovered_with_smallest_branch(uncovered: Set[int], chosen: Set[Constraint]) -> int:
             best_i, best_deg = None, 10**9
             for i in uncovered:
                 # candidates are predicates in E[i]; we can skip those already in chosen,
@@ -183,7 +184,7 @@ class LogicLearner(object):
         # DFS
         def dfs(chosen: Set[Constraint], covered: Set[int]):
             # Early domination prune
-            if dominated_by_existing(chosen):
+            if _dominated_by_existing(chosen):
                 return
 
             # Covered all evidences? record a minimal solution
@@ -219,12 +220,12 @@ class LogicLearner(object):
 
             # BnB optimistic bound
             if max_size is not None:
-                lb = optimistic_lb(uncovered)
+                lb = _optimistic_lb(uncovered)
                 if len(chosen) + lb > max_size:
                     return
 
             # Branch on the uncovered evidence with the smallest size (fail-first)
-            pivot = pick_uncovered_with_smallest_branch(uncovered, chosen)
+            pivot = _pick_uncovered_with_smallest_branch(uncovered, chosen)
             # Order candidate predicates by descending marginal gain
             cand = sorted(
                 E_list[pivot],
@@ -242,7 +243,7 @@ class LogicLearner(object):
                     new_covered = covered | idx_by_pred[p]
 
                 # Another quick domination check before descending
-                if dominated_by_existing(new_chosen):
+                if _dominated_by_existing(new_chosen):
                     continue
 
                 dfs(new_chosen, new_covered)
@@ -251,17 +252,17 @@ class LogicLearner(object):
                 if max_solutions is not None and len(solutions) >= max_solutions:
                     return
 
-        progress = tqdm(desc="... Found minimal hitting sets", unit=" sets", total=max_solutions)
+        progress = tqdm(desc="... Enumerating hitting sets", unit="sets", total=max_solutions)
         dfs(set(), set())
 
         # Convert back to list[set]
         return [set(s) for s in solutions]
     
-    def build_evidence_set(self, predicates: Set[Constraint]) -> List[Set[Constraint]]:
+    def build_evidence_set(self, predicates: Set[Constraint], save: bool = True) -> List[Set[Constraint]]:
         # Pre-pack predicates into a list so all workers use same reference
         predicates_list = list(predicates)
 
-        def process_chunk(worker_id, df_chunk: pd.DataFrame) -> List[Set[Constraint]]:
+        def _process_examples(worker_id, df_chunk: pd.DataFrame) -> List[Set[Constraint]]:
             chunk_results = []
             for _, row in tqdm(df_chunk.iterrows(), total=df_chunk.shape[0], desc="... Building evidence sets"):
                 row_dict = row.to_dict()
@@ -281,13 +282,18 @@ class LogicLearner(object):
 
         # Split into n_jobs chunks (avoid overhead of too many tasks)
         chunks = np.array_split(self.examples, n_jobs)
-        log.info(f"Processing {len(chunks)} chunks with {n_jobs} workers.")
+        log.info(f"Processing {len(chunks)} batches with {n_jobs} workers.")
 
         # Parallel execution — each worker gets a big chunk
         results = Parallel(n_jobs=n_jobs, backend="loky")(
-            delayed(process_chunk)(i, chunk)
+            delayed(_process_examples)(i, chunk)
             for i, chunk in enumerate(chunks)
         )
+        
+        if save:
+            with open(f"evidence_sets_{self.dataset}_{self.num_examples}.pkl", 'wb') as f:
+                pickle.dump(results, f)
+                log.info(f"Saved evidence sets to 'evidence_sets_{self.dataset}_{self.num_examples}.pkl'.")
 
         # Flatten results (list of lists)
         return [s for chunk in results for s in chunk]
@@ -531,9 +537,9 @@ class LogicLearner(object):
                     prior_rules.add(' & '.join(ne_predicates))
                     
         log.info(f"Created {len(predicates)} predicates. First a few:")
-        pprint(list(predicates)[:5])
+        # pprint(list(predicates)[:5])
         log.info(f"Created {len(prior_rules)} prior rules. First a few:")
-        pprint(list(prior_rules)[:5])
+        # pprint(list(prior_rules)[:5])
         
         constraint_predicates = set()
         for p in tqdm(predicates, desc="... Converting predicates to constraints"):
