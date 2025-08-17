@@ -51,7 +51,8 @@ def main(constructor: Constructor, refconstructor: Constructor, limit: int):
         # miner_versionspace(constructor, refconstructor, limit)
         learner = LogicLearner(constructor, limit=limit)
         log.info("Learning constraints using logic programming...")
-        learner.learn()
+        # learner.learn()
+        learner.learn_levelwise()
 
 if __name__ == '__main__':
     FLAGS(sys.argv)

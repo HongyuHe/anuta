@@ -13,6 +13,9 @@ from anuta.utils import log, consecutive_combinations, clausify, true, false
 from anuta.theory import Constraint
 
 
+tautology = Constraint(sp.true)
+contradition = Constraint(sp.false)
+
 @dataclass
 class Bounds:
     lb: float

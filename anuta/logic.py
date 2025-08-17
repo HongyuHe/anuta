@@ -16,11 +16,122 @@ import warnings
 from tqdm import tqdm
 warnings.filterwarnings("ignore")
 
-from anuta.grammar import TYPE_DOMIAN, ConstantType, DomainType, VariableType, group_variables_by_type
+from anuta.grammar import (
+    TYPE_DOMIAN, ConstantType, DomainType, VariableType, group_variables_by_type, tautology, contradition)
 from anuta.utils import log
 from anuta.theory import Constraint, Theory
 from anuta.constructor import Constructor
 
+def is_candidate_trivial(candidate: Constraint) -> bool:
+    #* Candidate is trivial if it is a tautology or contradition, or not an implication (assuming not predicates).
+    return candidate in [tautology, contradition] or not isinstance(candidate.expr, sp.Implies)
+
+def evaluate_predicates(predicates: Iterable[Constraint], df: pd.DataFrame) -> Tuple[Set[Constraint], Set[Constraint]]:
+    series = df.to_dict(orient='series')
+    valid_predicates = set()
+    invalid_predicates = set()
+    for predicate in tqdm(predicates, desc="... Testing predicates"):
+        if predicate in valid_predicates: 
+            continue
+        
+        expr = predicate.expr
+        arg1, arg2 = expr.args
+        
+        assert not isinstance(arg1, sp.Number), f"Predicate {predicate} has a number as the first argument."
+        values1 = eval(str(arg1), {}, series)
+        
+        if isinstance(arg2, sp.Integer):
+            values2 = int(arg2)
+        elif isinstance(arg2, sp.Float):
+            values2 = float(arg2)
+        else:
+            values2 = eval(str(arg2), {}, series)
+        
+        if all(values1 == values2):
+            valid_predicates.add(predicate)
+        elif all(values1 != values2):
+            valid_predicates.add(Constraint(sp.Not(predicate.expr)))
+        else:
+            invalid_predicates.add(predicate)
+        
+    return valid_predicates, invalid_predicates
+        
+
+def test_candidates(worker_id: int, candidates: Iterable[Constraint], df: pd.DataFrame) -> Set[Constraint]:
+    # True if expr holds for every row (no free symbols after substitution)
+    valid_candidates = set()
+    for candidate in tqdm(candidates, desc=f"... Testing candidates"):
+        is_valid = True
+        for _, row in (df.iterrows()):
+            assignment = row.to_dict()
+            try:
+                sat = candidate.expr.subs(assignment)
+                if not sat:
+                    is_valid = False
+                    break
+            except Exception as e:
+                log.error(f"Error evaluating candidate {candidate} with {assignment=}: {e}")
+                exit(1)
+        if is_valid:
+            valid_candidates.add(candidate)
+    return valid_candidates
+
+def generalize_candidates(self, invalid_candidates: List[Constraint]) -> Set[Constraint]:
+    # Sanity check: ensure only implications are passed
+    for c in invalid_candidates:
+        assert isinstance(c.expr, sp.Implies), f"Candidate {c} is not an implication."
+
+    def process_pair(c1: Constraint, c2: Constraint) -> Optional[Constraint]:
+        ant1, con1 = Constraint(c1.expr.args[0]), Constraint(c1.expr.args[1])
+        ant2, con2 = Constraint(c2.expr.args[0]), Constraint(c2.expr.args[1])
+
+        new_candidate = None
+        #& A => B and A => C to A => (B or C)
+        if ant1 == ant2:
+            new_candidate = Constraint(sp.Implies(ant1.expr, sp.Or(con1.expr, con2.expr)))
+        #& A => C and B => C to (A and B) => C
+        elif con1 == con2:
+            new_candidate = Constraint(sp.Implies(sp.And(ant1.expr, ant2.expr), con1.expr))
+
+        if new_candidate and not is_candidate_trivial(new_candidate):
+            return new_candidate
+        return None
+
+    nworkers = psutil.cpu_count()
+    pairs = combinations(invalid_candidates, 2)
+
+    results = Parallel(n_jobs=nworkers, backend="loky")(
+        delayed(process_pair)(c1, c2) for c1, c2 in tqdm(
+            pairs, desc=f"... Generalizing invalid candidates",
+            total=len(invalid_candidates) * (len(invalid_candidates) - 1) // 2)
+    )
+
+    return {res for res in results if res is not None}
+
+def build_pairwise_implications(invalid_predicates: Set[Constraint]) -> Set[Constraint]:
+    invalid_predicates = list(invalid_predicates)  # make sure it's indexable
+    nworkers = psutil.cpu_count()
+
+    def worker(subset: List[Constraint]) -> Set[Constraint]:
+        local_new = set()
+        for p1 in tqdm(subset, desc="... Building pairwise implication candidates"):
+            for p2 in invalid_predicates:
+                if p1 == p2:
+                    continue
+                candidate = Constraint(sp.Implies(p1.expr, p2.expr))
+                if not is_candidate_trivial(candidate):
+                    local_new.add(candidate)
+        return local_new
+
+    # Split invalid_predicates into chunks (for outer loop)
+    chunks = np.array_split(invalid_predicates, nworkers)
+
+    results = Parallel(n_jobs=nworkers, backend="loky")(
+        delayed(worker)(chunk) for chunk in chunks
+    )
+
+    new_candidates = set().union(*results)
+    return new_candidates
 
 class LogicLearner(object):
     
@@ -43,16 +154,66 @@ class LogicLearner(object):
         self.categoricals = [] # constructor.categoricals
         self.prior: Set[Constraint] = set()
     
-    def learn(
+    def learn_levelwise(
         self,
-        max_size: Optional[int] = 10,
+        max_iter: int = 5,
+        max_rules: Optional[int] = None,
+    ):
+        learned_rules: Set[Constraint] = set()
+        new_candidates: Set[Constraint] = set()
+        
+        predicates: Set[Constraint] = self.generate_predicates()
+        valid_predicates, invalid_predicates = evaluate_predicates(predicates, self.examples)
+        log.info(f"Evaluated {len(predicates)} predicates: {len(valid_predicates)} valid, {len(invalid_predicates)} invalid.")
+        learned_rules |= valid_predicates
+        
+        #& Build pairwise implications
+        new_candidates = build_pairwise_implications(invalid_predicates)
+        log.info(f"Created {len(new_candidates)} pairwise implication candidates.")
+        
+        epoch = 1
+        while epoch <= max_iter and new_candidates:
+            print(f"\tEpoch {epoch}: {len(new_candidates)} candidates...")
+            
+            current_candidates = new_candidates
+            new_candidates = set()
+            prev_learned = len(learned_rules)
+
+            nworkers = psutil.cpu_count()
+            chunks = np.array_split(list(current_candidates), nworkers)
+            results = Parallel(n_jobs=nworkers, backend="loky")(
+                delayed(test_candidates)(i, chunk, self.examples)
+                for i, chunk in enumerate(chunks)
+            )
+            valid_candidates = set().union(*results)
+            invalid_candidates = list(current_candidates - valid_candidates)
+            learned_rules |= valid_candidates
+            print(f"\tEpoch {epoch}: learned {len(learned_rules)-prev_learned} new rules, total {len(learned_rules)}.")
+            print(f"\tEpoch {epoch}: {len(invalid_candidates)} invalid candidates.")
+            
+            new_candidates = generalize_candidates(self, invalid_candidates)
+            print(f"\tEpoch {epoch}: {len(new_candidates)} new candidates generated.")
+            
+            if max_rules and len(learned_rules) >= max_rules:
+                log.info(f"Reached max rules limit of {max_rules}. Stopping.")
+                break
+            epoch += 1
+
+        log.info(f"Learned {len(learned_rules)} rules in {epoch} epochs.")
+        learned_rules |= self.prior
+        Theory.save_constraints(learned_rules, f'levelwise_{self.dataset}_{self.num_examples}_e{epoch}.pl')
+        return
+    
+    def learn_denial(
+        self,
+        max_size: Optional[int] = None,
         max_solutions: Optional[int] = 50_000,
     ):
         """
         1) Create predicate space (already intra-tuple).
         2) Build intra-tuple evidence sets: for each tuple t, SAT(t) = { P | t |= P }.
         3) Enumerate all minimal hitting sets with bounded DFS/BnB.
-        4) Return rules: Or(p in cover)
+        4) Return rules: Or(*[p in cover]) (instead of Denial constraints And(*[¬p in cover])).
         """
         predicates: Set[Constraint] = self.generate_predicates()
 
@@ -96,7 +257,7 @@ class LogicLearner(object):
     def enumerate_minimal_hitting_sets(
         self,
         evidence_sets: List[frozenset[Constraint]],
-        max_size: Optional[int] = 10,
+        max_size: Optional[int] = None,
         max_solutions: Optional[int] = 1_000_000,
     ) -> List[Set[Constraint]]:
         """
@@ -269,7 +430,7 @@ class LogicLearner(object):
                 satisfied = set()
                 for p in predicates_list:
                     try:
-                        if bool(p.expr.subs(row_dict)):
+                        if p.expr.subs(row_dict):
                             satisfied.add(p)
                     except Exception:
                         # Any substitution/eval failure = not satisfied
@@ -390,14 +551,21 @@ class LogicLearner(object):
                     for constant in self.constants[lhs].values:
                         predicates.add(f"Eq({lhs}, {constant})")
                         predicates.add(f"Ne({lhs}, {constant})")
+                elif vtype_lhs not in [VariableType.IP, VariableType.PORT]:
+                    #* Don't create Eq/Ne predicates for identifiers (IP/PORT).
+                    #* Only consider domain values if no constants are defined.
+                    #& X=x
+                    for value in self.domains[lhs].values:
+                        predicates.add(f"Eq({lhs}, {value})")
+                        predicates.add(f"Ne({lhs}, {value})")
             else:
                 #& DomainType.NUMERICAL
                 if (lhs in self.constants
                     and self.constants[lhs].kind == ConstantType.LIMIT):
-                    #& X ≤ c and X > c
+                    #& X > c and X ≤ c
                     for constant in self.constants[lhs].values:
-                        predicates.add(f"({lhs} >= {constant})")
-                        predicates.add(f"({lhs} < {constant})")
+                        predicates.add(f"({lhs} > {constant})")
+                        predicates.add(f"({lhs} <= {constant})")
                         #? Since we don't care equality (X=c), we omit the following:
                         # predicates.add(f"({lhs} <= {constant})")
                         # predicates.add(f"({lhs} > {constant})")
@@ -470,21 +638,21 @@ class LogicLearner(object):
                 if domaintype_lhs == DomainType.NUMERICAL:
                     assert domaintype_rhs == DomainType.NUMERICAL, \
                         "LHS and RHS must have the same domain type."
-                    #& Comparison predicates: A≥B
-                    predicate = f"({lhs}>={rhs})"
-                    predicate_values = (self.examples[lhs]>=self.examples[rhs]).astype(int)
+                    #& Comparison predicates: A>B
+                    predicate = f"({lhs}>{rhs})"
+                    predicate_values = (self.examples[lhs]>self.examples[rhs]).astype(int)
                     if predicate_values.nunique() > 1:
                         self.examples[predicate] = predicate_values
                         predicates.add(predicate)
                     else:
                         if predicate_values.iloc[0] == 0:
-                            predicate = f"({lhs}<{rhs})"
+                            predicate = f"({lhs}<={rhs})"
                         prior_rules.add(predicate)
                         continue
                     
-                    #& Comparison predicates: A<B
-                    predicate = f"({lhs}<{rhs})"
-                    predicate_values = (self.examples[lhs]<self.examples[rhs]).astype(int)
+                    #& Comparison predicates: A<=B
+                    predicate = f"({lhs}<={rhs})"
+                    predicate_values = (self.examples[lhs]<=self.examples[rhs]).astype(int)
                     assert predicate_values.nunique() > 1, \
                         "Predicate should have >1 unique value to this point."
                     self.examples[predicate] = predicate_values
@@ -492,9 +660,9 @@ class LogicLearner(object):
         #^ End for j, lhs in enumerate(self.variables)
         
         '''Add domain constraints to prior rules.'''
+        self.examples = self.examples[self.variables]
         #* First drop identifiers
         identifiers = typed_variables[VariableType.IP]+typed_variables[VariableType.PORT]
-        self.examples.drop(columns=identifiers, inplace=True)
         for var in identifiers:
             if var in self.variables:
                 self.variables.remove(var)
@@ -536,9 +704,9 @@ class LogicLearner(object):
                 if ne_predicates and not any(keyword in varname.lower() for keyword in keywords):
                     prior_rules.add(' & '.join(ne_predicates))
                     
-        log.info(f"Created {len(predicates)} predicates. First a few:")
+        log.info(f"Created {len(predicates)} predicates.")
         # pprint(list(predicates)[:5])
-        log.info(f"Created {len(prior_rules)} prior rules. First a few:")
+        log.info(f"Created {len(prior_rules)} prior rules.")
         # pprint(list(prior_rules)[:5])
         
         constraint_predicates = set()
@@ -547,8 +715,7 @@ class LogicLearner(object):
                 p = Constraint(sp.sympify(p))
                 constraint_predicates.add(p)
         
-        assert len(constraint_predicates) == len(predicates), \
-            f"Duplicate predicates found: {len(predicates) - len(constraint_predicates)}"
+        log.info(f"Duplicate predicates found: {len(predicates) - len(constraint_predicates)}")
         
         self.prior = {Constraint(sp.sympify(r)) for r in prior_rules
                         if r not in [sp.true, sp.false]}

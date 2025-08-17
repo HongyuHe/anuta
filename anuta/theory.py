@@ -44,7 +44,7 @@ class Constraint(object):
         return self.canonical == another.canonical
     
     def __repr__(self) -> str:
-        return f"Constraint: {self.expr}"
+        return f"Constraint::{self.expr}"
     
     def __str__(self) -> str:
         return self.__repr__()
