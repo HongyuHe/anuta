@@ -113,15 +113,15 @@ def build_pairwise_implications(invalid_predicates: Set[Constraint]) -> Set[Cons
     nworkers = psutil.cpu_count()
 
     def worker(subset: List[Constraint]) -> Set[Constraint]:
-        local_new = set()
+        local_new = list()
         for p1 in tqdm(subset, desc="... Building pairwise implication candidates"):
             for p2 in invalid_predicates:
-                if p1 == p2:
+                if p1 == p2 and p1 != Constraint(sp.Not(p2.expr)):
                     continue
                 candidate = Constraint(sp.Implies(p1.expr, p2.expr))
                 if not is_candidate_trivial(candidate):
-                    local_new.add(candidate)
-        return local_new
+                    local_new.append(candidate)
+        return set(local_new)
 
     # Split invalid_predicates into chunks (for outer loop)
     chunks = np.array_split(invalid_predicates, nworkers)
