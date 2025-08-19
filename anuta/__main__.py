@@ -48,12 +48,13 @@ def main(constructor: Constructor, refconstructor: Constructor, limit: int):
     elif FLAGS.baseline:
         miner_valiant(constructor, limit)
     else:
-        # miner_versionspace(constructor, refconstructor, limit)
         learner = LogicLearner(constructor, limit=limit)
         log.info("Learning constraints using logic programming...")
-        # learner.learn_denial()
-        learner.learn_levelwise_coverage()
+        learner.learn_denial()
+        # learner.learn_levelwise_coverage()
         # learner.learn_levelwise()
+        
+        # miner_versionspace(constructor, refconstructor, limit)
 
 if __name__ == '__main__':
     assert '.csv' in FLAGS.data, "Data file is not CSV."

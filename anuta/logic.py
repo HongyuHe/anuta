@@ -25,7 +25,7 @@ from anuta.theory import Constraint, Theory
 from anuta.constructor import Constructor
 from anuta.cli import FLAGS
 
-# cfg = FLAGS.config
+cfg = FLAGS.config
 
 def is_candidate_trivial(candidate: Constraint) -> bool:
     #* Candidate is trivial if it is a tautology or contradition, or not an implication (assuming not predicates).
@@ -271,8 +271,8 @@ class LogicLearner(object):
     
     def learn_denial(
         self,
-        max_size: Optional[int] = 3,
-        max_solutions: Optional[int] = 2000,
+        max_predicates: Optional[int] = cfg.MAX_PREDICATES,
+        max_learned_rules: Optional[int] = cfg.MAX_RULES,
     ):
         """
         1) Create predicate space (already intra-tuple).
@@ -303,9 +303,14 @@ class LogicLearner(object):
         start = perf_counter()
         covers = self.enumerate_minimal_hitting_sets(
             evidence_sets=evidence_sets,
-            max_size=max_size,
-            max_solutions=max_solutions,
+            max_size=max_predicates,
+            max_solutions=max_learned_rules,
         )
+        # covers = self.enumerate_minimal_hitting_sets_parallel(
+        #     evidence_sets=evidence_sets,
+        #     max_size=max_size,
+        #     max_solutions=max_solutions,
+        # )
         end = perf_counter()
         log.info(f"Enumerated {len(covers)} minimal hitting sets in {end - start:.2f} seconds.")
         
@@ -328,7 +333,7 @@ class LogicLearner(object):
         for constraint in self.prior:
             learned_rules.add(constraint.expr)
         log.info(f"Total {len(learned_rules)} rules (including prior).")
-        Theory.save_constraints(learned_rules, f'denial_{self.dataset}_{self.num_examples}_s{max_size}.pl')
+        Theory.save_constraints(learned_rules, f'denial_{self.dataset}_{self.num_examples}_p{max_predicates}.pl')
         return
         
         
@@ -368,7 +373,8 @@ class LogicLearner(object):
         # Precompute each evidence set as a list to iterate deterministically
         E_list: List[List[Constraint]] = [list(E) for E in evidence_sets]
 
-        # Optional predicate ordering: higher coverage first (helps pruning) [Chu et al., VLDB '13]
+        # pred_order = [p for p, _ in idx_by_pred.items()]
+        #* Optional predicate ordering: higher coverage first (helps pruning) [Chu et al., VLDB '13]
         log.info("Ordering predicates by coverage...")
         pred_by_cov = sorted(idx_by_pred.items(), key=lambda kv: -len(kv[1]))
         pred_order = [p for p, _ in pred_by_cov]
@@ -387,16 +393,10 @@ class LogicLearner(object):
         # Check coverage
         FULL = set(range(len(E_list)))
 
-        # def _covered_indices(chosen: Set[Constraint]) -> Set[int]:
-        #     covered = set()
-        #     for p in chosen:
-        #         covered |= idx_by_pred[p]
-        #     return covered
-
         #* Optimistic bound on remaining picks:
         # If we still need to cover R uncovered evidences, and the best single predicate
         # can cover at most M of them, then we need at least ceil(|R|/M) more predicates.
-        # If chosen_size + that lower bound > max_size, prune.
+        # If len(chosen) + that lower bound > max_size, prune.
         # (Simple but effective for a BnB cut.)
         def _optimistic_lb(uncovered: Set[int]) -> int:
             if not uncovered:
@@ -410,9 +410,9 @@ class LogicLearner(object):
                         break
             return 1 if best_gain == 0 else ( (len(uncovered) + best_gain - 1) // best_gain )
 
-        # Choose an uncovered evidence with the fewest candidates (fail-first)
+        #* Choose an uncovered evidence with the fewest predicates (fail-first)
         def _pick_uncovered_with_smallest_branch(uncovered: Set[int], chosen: Set[Constraint]) -> int:
-            best_i, best_deg = None, 10**9
+            best_i, best_deg = None, float('inf')
             for i in uncovered:
                 # candidates are predicates in E[i]; we can skip those already in chosen,
                 # but keeping them is fine — small effect on degree.
@@ -459,21 +459,22 @@ class LogicLearner(object):
             # Remaining uncovered
             uncovered = FULL - covered
 
-            # BnB optimistic bound
+            #* BnB optimistic bound
             if max_size is not None:
                 lb = _optimistic_lb(uncovered)
                 if len(chosen) + lb > max_size:
                     return
 
-            # Branch on the uncovered evidence with the smallest size (fail-first)
+            #* Branch on the uncovered evidence covered by fewest predicates (fail-first)
             pivot = _pick_uncovered_with_smallest_branch(uncovered, chosen)
-            # Order candidate predicates by descending marginal gain
-            cand = sorted(
+            #* Order candidate predicates by descending marginal gain
+            #*  where gain is the number of uncovered evidences they cover.
+            predicates = sorted(
                 E_list[pivot],
                 key=lambda p: -len((idx_by_pred[p]) & uncovered)
             )
 
-            for p in cand:
+            for p in predicates:
                 if p in chosen:
                     # Already picked (rare in this branch), but continue recursion to avoid duplicates
                     new_chosen = chosen
@@ -489,7 +490,7 @@ class LogicLearner(object):
 
                 dfs(new_chosen, new_covered)
 
-                # Optional early stop if we reached the cap
+                #* Early stop if we reached the cap
                 if max_solutions is not None and len(solutions) >= max_solutions:
                     return
 
@@ -499,7 +500,7 @@ class LogicLearner(object):
 
         # Convert back to list[set]
         return [set(s) for s in solutions]
-    
+
     def learn_levelwise_coverage(
         self,
         max_size: int = 20,
@@ -956,3 +957,125 @@ class LogicLearner(object):
                         if r not in [sp.true, sp.false]}
         
         return constraint_predicates
+
+    
+    def enumerate_minimal_hitting_sets_parallel(
+        self,
+        evidence_sets: List[frozenset[Constraint]],
+        max_size: Optional[int] = None,
+        max_solutions: Optional[int] = None,
+    ) -> List[Set[Constraint]]:
+        """
+        Parallelized enumeration of all minimal hitting sets.
+        Each top-level branch (first predicate choices) is explored in parallel.
+        """
+        if not evidence_sets:
+            return []
+
+        # Index: predicate -> evidence indices
+        log.info("Indexing predicates in evidence sets...")
+        idx_by_pred: Dict[Constraint, Set[int]] = defaultdict(set)
+        for i, E in enumerate(evidence_sets):
+            for p in E:
+                idx_by_pred[p].add(i)
+
+        E_list: List[List[Constraint]] = [list(E) for E in evidence_sets]
+
+        log.info("Ordering predicates by coverage...")
+        pred_by_cov = sorted(idx_by_pred.items(), key=lambda kv: -len(kv[1]))
+        pred_order = [p for p, _ in pred_by_cov]
+
+        FULL = set(range(len(E_list)))
+
+        def _optimistic_lb(uncovered: Set[int]) -> int:
+            if not uncovered:
+                return 0
+            best_gain = 0
+            for p in pred_order:
+                gain = len(uncovered & idx_by_pred[p])
+                if gain > best_gain:
+                    best_gain = gain
+                    if best_gain == len(uncovered):
+                        break
+            return 1 if best_gain == 0 else (len(uncovered) + best_gain - 1) // best_gain
+
+        def _pick_uncovered_with_smallest_branch(uncovered: Set[int]) -> int:
+            best_i, best_deg = None, 10**9
+            for i in uncovered:
+                deg = len(E_list[i])
+                if deg < best_deg:
+                    best_deg = deg
+                    best_i = i
+            return best_i
+
+        def dfs(chosen: Set[Constraint], covered: Set[int], local_solutions: List[frozenset[Constraint]]):
+            # Covered all?
+            if covered == FULL:
+                fc = frozenset(chosen)
+                # enforce minimality locally
+                keep = []
+                for s in local_solutions:
+                    if s.issubset(fc):
+                        if s != fc:
+                            return
+                    elif fc.issubset(s):
+                        continue
+                    keep.append(s)
+                local_solutions.clear()
+                local_solutions.extend(keep)
+                local_solutions.append(fc)
+                return
+
+            if max_size is not None and len(chosen) >= max_size:
+                return
+
+            uncovered = FULL - covered
+            if max_size is not None:
+                lb = _optimistic_lb(uncovered)
+                if len(chosen) + lb > max_size:
+                    return
+
+            pivot = _pick_uncovered_with_smallest_branch(uncovered)
+            cand = sorted(E_list[pivot], key=lambda p: -len((idx_by_pred[p]) & uncovered))
+
+            for p in cand:
+                if p in chosen:
+                    continue
+                new_chosen = set(chosen)
+                new_chosen.add(p)
+                new_covered = covered | idx_by_pred[p]
+                dfs(new_chosen, new_covered, local_solutions)
+
+        # --- Parallel frontier expansion ---
+        log.info("Launching parallel hitting set enumeration...")
+        first_pivot = _pick_uncovered_with_smallest_branch(FULL)
+        first_cands = sorted(E_list[first_pivot], key=lambda p: -len(idx_by_pred[p]))
+
+        n_jobs = psutil.cpu_count()
+
+        results = Parallel(n_jobs=n_jobs)(
+            delayed(lambda p: (
+                p,
+                dfs({p}, idx_by_pred[p], [])
+            ))(p) for p in first_cands
+        )
+
+        # Merge results
+        all_solutions: List[frozenset[Constraint]] = []
+        for _, sols in results:
+            if sols is not None:
+                for s in sols:
+                    # enforce global minimality
+                    dominated = False
+                    to_keep = []
+                    for t in all_solutions:
+                        if t.issubset(s):
+                            dominated = True
+                            break
+                        elif s.issubset(t):
+                            continue
+                        to_keep.append(t)
+                    if not dominated:
+                        all_solutions = to_keep + [s]
+
+        return [set(s) for s in all_solutions]
