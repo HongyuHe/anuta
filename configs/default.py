@@ -6,7 +6,7 @@ def get_config():
     
     default_config.MAX_PREDICATES = 12  #* Maximum number of predicates in a rule
     default_config.LEVELWISE_EPOCHS = 10  #* Number of epochs for levelwise learning
-    default_config.MAX_RULES = 100_000  #* Maximum number of rules to learn
+    default_config.MAX_RULES = 50_000  #* Maximum number of rules to learn
     
     '''Tree leaning configuration'''
     default_config.MAX_COMBO_SIZE = 0 #* If combo size is non-positive, use all combinations
