@@ -1,5 +1,7 @@
 from collections import defaultdict
 from itertools import combinations
+from pathlib import Path
+from multiprocess import Pool
 from time import perf_counter
 from typing import *
 from joblib import Parallel, delayed
@@ -21,10 +23,114 @@ from anuta.grammar import (
 from anuta.utils import log
 from anuta.theory import Constraint, Theory
 from anuta.constructor import Constructor
+from anuta.cli import FLAGS
+
+# cfg = FLAGS.config
 
 def is_candidate_trivial(candidate: Constraint) -> bool:
     #* Candidate is trivial if it is a tautology or contradition, or not an implication (assuming not predicates).
     return candidate in [tautology, contradition] or not isinstance(candidate.expr, sp.Implies)
+
+# -------------------------------
+# Coverage mask builder
+# -------------------------------
+def evaluate_predicates_with_masks(
+    predicates: Iterable[Constraint],
+    df: pd.DataFrame
+) -> Tuple[Dict[Constraint, int], Set[Constraint]]:
+    """
+    Evaluate predicates across df and return:
+      - mask_by_pred: {predicate -> int bitmask} (bit i = 1 iff row i satisfies predicate)
+      - valid_predicates: {Constraint} (predicates true for ALL rows)
+
+    Notes
+    -----
+    - This replaces build_evidence_set.
+    - Predicates that are valid on all rows are recorded separately.
+    - Other predicates have coverage masks stored in mask_by_pred.
+    """
+    series = df.to_dict(orient="series")
+    n = df.shape[0]
+
+    mask_by_pred: Dict[Constraint, int] = {}
+    valid_predicates: Set[Constraint] = set()
+
+    for predicate in tqdm(predicates, desc="... Evaluating predicates"):
+        expr = predicate.expr
+        arg1, arg2 = expr.args
+
+        # LHS values
+        assert not isinstance(arg1, sp.Number), f"Predicate {predicate} has a number as lhs"
+        values1 = eval(str(arg1), {}, series)
+
+        # RHS values
+        if isinstance(arg2, sp.Integer):
+            values2 = int(arg2)
+        elif isinstance(arg2, sp.Float):
+            values2 = float(arg2)
+        else:
+            values2 = eval(str(arg2), {}, series)
+
+        sat: pd.Series = None
+        if isinstance(expr, sp.Eq):
+            sat = (values1 == values2)
+        elif isinstance(expr, sp.Ne):
+            sat = (values1 != values2)
+        elif isinstance(expr, sp.StrictGreaterThan):
+            sat = (values1 > values2)
+        else:
+            assert isinstance(expr, sp.LessThan), f"Unsupported predicate type: {expr}"
+            sat = (values1 <= values2)
+
+        # Convert to bitmask
+        if sat.all():
+            valid_predicates.add(predicate)
+            continue
+
+        # Convert boolean array to bitmask integer
+        bits = np.packbits(sat.astype(np.uint8)[::-1])  # pack, reverse for correct order
+        mask = int.from_bytes(bits.tobytes(), "big")
+
+        mask_by_pred[predicate] = mask
+    return mask_by_pred, valid_predicates
+
+
+# -------------------------------
+# Coverage-levelwise candidate
+# -------------------------------
+@dataclass(frozen=True)
+class CoverageCandidate:
+    preds: frozenset[Constraint]  # set of predicates
+    mask: int         # coverage bitmask
+    
+# -------------------------------
+# Frontier helpers
+# -------------------------------
+def order_frontier(frontier: List[CoverageCandidate]) -> List[CoverageCandidate]:
+    """Order candidates by descending coverage size (larger mask population first)."""
+    return sorted(frontier, key=lambda c: bin(c.mask).count("1"), reverse=True)
+
+
+def dedup_frontier(frontier: List[CoverageCandidate]) -> List[CoverageCandidate]:
+    """Remove duplicates (by predicate set)."""
+    seen = set()
+    deduped = []
+    for c in frontier:
+        if c.preds not in seen:
+            deduped.append(c)
+            seen.add(c.preds)
+    return deduped
+
+
+def is_super_of_learned(candidate: CoverageCandidate, learned: Set[frozenset]) -> bool:
+    """
+    True if candidate is a strict superset of any already learned rule.
+    Such candidates cannot be minimal and can be pruned.
+    """
+    for lr in learned:
+        if lr.issubset(candidate.preds):
+            return True
+    return False
 
 def evaluate_predicates(predicates: Iterable[Constraint], df: pd.DataFrame) -> Tuple[Set[Constraint], Set[Constraint]]:
     series = df.to_dict(orient='series')
@@ -57,15 +163,15 @@ def evaluate_predicates(predicates: Iterable[Constraint], df: pd.DataFrame) -> T
     return valid_predicates, invalid_predicates
         
 
-def test_candidates(worker_id: int, candidates: Iterable[Constraint], df: pd.DataFrame) -> Set[Constraint]:
+def test_candidates(worker_id: int, candidates: Iterable[sp.Expr], df: pd.DataFrame) -> Set[sp.Expr]:
     # True if expr holds for every row (no free symbols after substitution)
     valid_candidates = set()
-    for candidate in tqdm(candidates, desc=f"... Testing candidates"):
+    for candidate in tqdm(candidates, desc=f"... Testing candidates (worker {worker_id})"):
         is_valid = True
         for _, row in (df.iterrows()):
             assignment = row.to_dict()
             try:
-                sat = candidate.expr.subs(assignment)
+                sat = candidate.subs(assignment)
                 if not sat:
                     is_valid = False
                     break
@@ -76,58 +182,67 @@ def test_candidates(worker_id: int, candidates: Iterable[Constraint], df: pd.Dat
             valid_candidates.add(candidate)
     return valid_candidates
 
-def generalize_candidates(self, invalid_candidates: List[Constraint]) -> Set[Constraint]:
-    # Sanity check: ensure only implications are passed
-    for c in invalid_candidates:
-        assert isinstance(c.expr, sp.Implies), f"Candidate {c} is not an implication."
+def generalize_candidates(invalid_candidates: List[sp.Expr]) -> Set[sp.Expr]:
+    def process_pair(worker_id: int, pairs: List[Tuple[sp.Expr, sp.Expr]]) -> Set[sp.Expr]:
+        new_candidates: Set[sp.Expr] = set()
+        for c1, c2 in tqdm(pairs, desc=f"... Generalizing candidates (worker {worker_id})"):
+            ant1, con1 = c1.args[0], c1.args[1]
+            ant2, con2 = c2.args[0], c2.args[1]
 
-    def process_pair(c1: Constraint, c2: Constraint) -> Optional[Constraint]:
-        ant1, con1 = Constraint(c1.expr.args[0]), Constraint(c1.expr.args[1])
-        ant2, con2 = Constraint(c2.expr.args[0]), Constraint(c2.expr.args[1])
+            new_candidate = None
+            #& A => B and A => C to A => (B or C)
+            #! Best to check `Constraint(ant1) == Constraint(ant2)` but too expensive.
+            if ant1 == ant2:
+                new_candidate = sp.Implies(ant1, sp.Or(con1, con2))
+            #& A => C and B => C to (A and B) => C
+            elif con1 == con2:
+                new_candidate = sp.Implies(sp.And(ant1, ant2), con1)
 
-        new_candidate = None
-        #& A => B and A => C to A => (B or C)
-        if ant1 == ant2:
-            new_candidate = Constraint(sp.Implies(ant1.expr, sp.Or(con1.expr, con2.expr)))
-        #& A => C and B => C to (A and B) => C
-        elif con1 == con2:
-            new_candidate = Constraint(sp.Implies(sp.And(ant1.expr, ant2.expr), con1.expr))
+            if new_candidate and new_candidate not in [sp.true, sp.false]: #not is_candidate_trivial(new_candidate):
+                new_candidates.add(new_candidate)
+        return new_candidates
 
-        if new_candidate and not is_candidate_trivial(new_candidate):
-            return new_candidate
-        return None
+    # Generate all pairs of invalid candidates
+    pairs = list(combinations(invalid_candidates, 2))
+    if not pairs:
+        return set()
 
-    nworkers = psutil.cpu_count()
-    pairs = combinations(invalid_candidates, 2)
+    # Split work into chunks
+    nworkers = min(psutil.cpu_count(logical=True), len(pairs))
+    chunks = np.array_split(pairs, nworkers)
 
+    # Run in parallel
     results = Parallel(n_jobs=nworkers, backend="loky")(
-        delayed(process_pair)(c1, c2) for c1, c2 in tqdm(
-            pairs, desc=f"... Generalizing invalid candidates",
-            total=len(invalid_candidates) * (len(invalid_candidates) - 1) // 2)
+        delayed(process_pair)(i, chunk) for i, chunk in enumerate(chunks) if len(chunk) > 0
     )
 
-    return {res for res in results if res is not None}
+    # Merge results
+    return set().union(*results)
 
-def build_pairwise_implications(invalid_predicates: Set[Constraint]) -> Set[Constraint]:
+
+def build_pairwise_implications(invalid_predicates: Set[Constraint]) -> Set[sp.Expr]:
     invalid_predicates = list(invalid_predicates)  # make sure it's indexable
     nworkers = psutil.cpu_count()
 
-    def worker(subset: List[Constraint]) -> Set[Constraint]:
-        local_new = list()
-        for p1 in tqdm(subset, desc="... Building pairwise implication candidates"):
+    def worker(worker_id: int, subset: List[Constraint]) -> Set[Constraint]:
+        local_new = set()
+        for p1 in tqdm(subset, desc=f"... Building pairwise implications (worker {worker_id})"):
             for p2 in invalid_predicates:
                 if p1 == p2 and p1 != Constraint(sp.Not(p2.expr)):
                     continue
-                candidate = Constraint(sp.Implies(p1.expr, p2.expr))
-                if not is_candidate_trivial(candidate):
-                    local_new.append(candidate)
+                #! Conversion to Constraint is too expensive, so we skip it here.
+                # candidate = Constraint(sp.Implies(p1.expr, p2.expr))
+                # if not is_candidate_trivial(candidate):
+                candidate = sp.Implies(p1.expr, p2.expr)
+                if candidate not in [sp.true, sp.false] and isinstance(candidate, sp.Implies):
+                    local_new.add(candidate)
         return set(local_new)
 
     # Split invalid_predicates into chunks (for outer loop)
     chunks = np.array_split(invalid_predicates, nworkers)
 
     results = Parallel(n_jobs=nworkers, backend="loky")(
-        delayed(worker)(chunk) for chunk in chunks
+        delayed(worker)(i, chunk) for i, chunk in enumerate(chunks)
     )
 
     new_candidates = set().union(*results)
@@ -154,60 +269,10 @@ class LogicLearner(object):
         self.categoricals = [] # constructor.categoricals
         self.prior: Set[Constraint] = set()
     
-    def learn_levelwise(
-        self,
-        max_iter: int = 5,
-        max_rules: Optional[int] = None,
-    ):
-        learned_rules: Set[Constraint] = set()
-        new_candidates: Set[Constraint] = set()
-        
-        predicates: Set[Constraint] = self.generate_predicates()
-        valid_predicates, invalid_predicates = evaluate_predicates(predicates, self.examples)
-        log.info(f"Evaluated {len(predicates)} predicates: {len(valid_predicates)} valid, {len(invalid_predicates)} invalid.")
-        learned_rules |= valid_predicates
-        
-        #& Build pairwise implications
-        new_candidates = build_pairwise_implications(invalid_predicates)
-        log.info(f"Created {len(new_candidates)} pairwise implication candidates.")
-        
-        epoch = 1
-        while epoch <= max_iter and new_candidates:
-            print(f"\tEpoch {epoch}: {len(new_candidates)} candidates...")
-            
-            current_candidates = new_candidates
-            new_candidates = set()
-            prev_learned = len(learned_rules)
-
-            nworkers = psutil.cpu_count()
-            chunks = np.array_split(list(current_candidates), nworkers)
-            results = Parallel(n_jobs=nworkers, backend="loky")(
-                delayed(test_candidates)(i, chunk, self.examples)
-                for i, chunk in enumerate(chunks)
-            )
-            valid_candidates = set().union(*results)
-            invalid_candidates = list(current_candidates - valid_candidates)
-            learned_rules |= valid_candidates
-            print(f"\tEpoch {epoch}: learned {len(learned_rules)-prev_learned} new rules, total {len(learned_rules)}.")
-            print(f"\tEpoch {epoch}: {len(invalid_candidates)} invalid candidates.")
-            
-            new_candidates = generalize_candidates(self, invalid_candidates)
-            print(f"\tEpoch {epoch}: {len(new_candidates)} new candidates generated.")
-            
-            if max_rules and len(learned_rules) >= max_rules:
-                log.info(f"Reached max rules limit of {max_rules}. Stopping.")
-                break
-            epoch += 1
-
-        log.info(f"Learned {len(learned_rules)} rules in {epoch} epochs.")
-        learned_rules |= self.prior
-        Theory.save_constraints(learned_rules, f'levelwise_{self.dataset}_{self.num_examples}_e{epoch}.pl')
-        return
-    
     def learn_denial(
         self,
-        max_size: Optional[int] = None,
-        max_solutions: Optional[int] = 50_000,
+        max_size: Optional[int] = 3,
+        max_solutions: Optional[int] = 2000,
     ):
         """
         1) Create predicate space (already intra-tuple).
@@ -215,13 +280,23 @@ class LogicLearner(object):
         3) Enumerate all minimal hitting sets with bounded DFS/BnB.
         4) Return rules: Or(*[p in cover]) (instead of Denial constraints And(*[¬p in cover])).
         """
-        predicates: Set[Constraint] = self.generate_predicates()
-
-        start = perf_counter()
-        evidence_sets: List[frozenset[Constraint]] = self.build_evidence_set(predicates)
-        end = perf_counter()
-        log.info(f"\nBuilt {len(evidence_sets)} evidence sets in {end - start:.2f} seconds.")
-
+        predicates: Set[Constraint] = self.generate_predicates_and_prior()
+        #* First check if the evidence sets file exists, if so, load it.
+        evidence_sets_file = f'data/evidence_sets_{self.dataset}_{self.num_examples}.pkl'
+        if Path(evidence_sets_file).exists():
+            log.info(f"Loading evidence sets from {evidence_sets_file}...")
+            with open(evidence_sets_file, 'rb') as f:
+                evidence_sets: List[frozenset[Constraint]] = pickle.load(f)
+            log.info(f"Loaded {len(evidence_sets)} evidence sets.")
+        else:
+            start = perf_counter()
+            evidence_sets: List[frozenset[Constraint]] = self.build_evidence_set(predicates)
+            end = perf_counter()
+            log.info(f"\nBuilt {len(evidence_sets)} evidence sets in {end - start:.2f} seconds.")
+        
+        assert len(evidence_sets) == self.examples.shape[0], \
+            f"Evidence sets size {len(evidence_sets)} != the # of examples {self.examples.shape[0]}."    
+        
         if not evidence_sets:
             log.warning("No non-empty evidence sets were produced; returning only prior.")
 
@@ -234,13 +309,14 @@ class LogicLearner(object):
         end = perf_counter()
         log.info(f"Enumerated {len(covers)} minimal hitting sets in {end - start:.2f} seconds.")
         
-        learned_rules: Set[Constraint] = set()
+        learned_rules: Set[sp.Expr] = set()
         num_trivial = 0
         for cover in tqdm(covers, desc="... Collecting learned rules"):
             rule = sp.Or(*[c.expr for c in cover])
             #* Remove trivial rules (True/False).
             if rule not in [sp.true, sp.false]:
-                learned_rules.add(Constraint(rule))
+                # learned_rules.add(Constraint(rule))
+                learned_rules.add(rule)
             else:
                 num_trivial += 1
                 
@@ -248,9 +324,11 @@ class LogicLearner(object):
         log.info(f"Learned {num_learned} rules.")
         log.info(f"Removed {num_trivial} trivial rules (True/False).")
         
-        learned_rules |= self.prior
+        # learned_rules |= self.prior
+        for constraint in self.prior:
+            learned_rules.add(constraint.expr)
         log.info(f"Total {len(learned_rules)} rules (including prior).")
-        Theory.save_constraints(learned_rules, f'denial_{self.dataset}_{self.num_examples}.pl')
+        Theory.save_constraints(learned_rules, f'denial_{self.dataset}_{self.num_examples}_s{max_size}.pl')
         return
         
         
@@ -258,7 +336,7 @@ class LogicLearner(object):
         self,
         evidence_sets: List[frozenset[Constraint]],
         max_size: Optional[int] = None,
-        max_solutions: Optional[int] = 1_000_000,
+        max_solutions: Optional[int] = None,
     ) -> List[Set[Constraint]]:
         """
         Enumerate all minimal hitting sets H such that ∀E in evidence_sets: H ∩ E ≠ ∅.
@@ -281,6 +359,7 @@ class LogicLearner(object):
             return []
 
         # Index: for each predicate, which evidence indices contain it?
+        log.info("Indexing predicates in evidence sets...")
         idx_by_pred: Dict[Constraint, Set[int]] = defaultdict(set)
         for i, E in enumerate(evidence_sets):
             for p in E:
@@ -290,6 +369,7 @@ class LogicLearner(object):
         E_list: List[List[Constraint]] = [list(E) for E in evidence_sets]
 
         # Optional predicate ordering: higher coverage first (helps pruning) [Chu et al., VLDB '13]
+        log.info("Ordering predicates by coverage...")
         pred_by_cov = sorted(idx_by_pred.items(), key=lambda kv: -len(kv[1]))
         pred_order = [p for p, _ in pred_by_cov]
 
@@ -413,11 +493,165 @@ class LogicLearner(object):
                 if max_solutions is not None and len(solutions) >= max_solutions:
                     return
 
-        progress = tqdm(desc="... Enumerating hitting sets", unit="sets", total=max_solutions)
+        progress = tqdm(desc=f"... Enumerating hitting sets ({max_size=})", 
+                        unit=" sets", total=max_solutions)
         dfs(set(), set())
 
         # Convert back to list[set]
         return [set(s) for s in solutions]
+    
+    def learn_levelwise_coverage(
+        self,
+        max_size: int = 20,
+        max_rules: Optional[int] = None,
+    ):
+        """
+        Coverage-levelwise algorithm:
+        1. Compute mask per predicate (bitset of satisfied examples).
+        2. Singletons that cover ALL are learned.
+        3. Iteratively join (Apriori rule: k-1 overlap) to build larger candidates.
+        4. Stop when max_size is reached or no new candidates.
+        """
+        predicates: Set[Constraint] = self.generate_predicates_and_prior()
+        mask_by_pred, valid_preds = evaluate_predicates_with_masks(predicates, self.examples)
+        log.info(f"Evaluated {len(predicates)} predicates: {len(valid_preds)} valid, {len(mask_by_pred)} invalid.")
+        n = self.examples.shape[0]
+        FULL_MASK = (1 << n) - 1
+
+        learned_rules: Set[frozenset] = set()
+        learned_constraints: Set[sp.Expr] = set()
+
+        # Add always-valid predicates
+        for vp in valid_preds:
+            learned_rules.add(frozenset({vp}))
+            learned_constraints.add(vp.expr)
+
+        # Initialize level-1 candidates (those not valid everywhere)
+        current_level: List[CoverageCandidate] = [
+            CoverageCandidate(frozenset({p}), mask)
+            for p, mask in mask_by_pred.items()
+        ]
+
+        k = 1
+        while current_level and k < max_size:
+            log.info(f"Level {k}: {len(current_level)} candidates.")
+            # Frontier maintenance
+            beam_width = None
+            current_level = order_frontier(dedup_frontier(current_level))[:beam_width]
+            if len(current_level) == beam_width:
+                log.warning(f"Truncated to {beam_width} candidates for level {k}.")
+
+            next_level: List[CoverageCandidate] = []
+
+            prev_learned = len(learned_rules)
+            # Apriori joins
+            for i, a in enumerate(tqdm(current_level, desc=f"Level {k} joins")):
+                for j in range(i + 1, len(current_level)):
+                    b = current_level[j]
+
+                    if len(a.preds & b.preds) != (k - 1):
+                        continue
+
+                    new_preds = a.preds | b.preds
+                    if len(new_preds) != k + 1:
+                        continue
+
+                    if is_super_of_learned(CoverageCandidate(new_preds, 0), learned_rules):
+                        continue
+
+                    new_mask = a.mask | b.mask
+
+                    if new_mask == FULL_MASK:
+                        # Found valid cover
+                        if new_preds not in learned_rules:
+                            learned_rules.add(new_preds)
+                            rule_expr = sp.Or(*[p.expr for p in new_preds])
+                            learned_constraints.add(rule_expr)
+                            if max_rules and len(learned_constraints) >= max_rules:
+                                log.info(f"Reached {max_rules=}, stopping.")
+                                Theory.save_constraints(
+                                    learned_constraints,
+                                    f"coverage_{self.dataset}_{self.num_examples}.pl"
+                                )
+                                return
+                    else:
+                        next_level.append(CoverageCandidate(new_preds, new_mask))
+
+            current_level = next_level
+            log.info(f"Level {k}: Learned {len(learned_rules) - prev_learned} new rules, total {len(learned_rules)}.")
+            k += 1
+
+        log.info(f"Learned {len(learned_constraints)} rules in total.")
+        # learned_constraints |= self.prior
+        for constraint in self.prior:
+            learned_rules.add(constraint.expr)
+        Theory.save_constraints(
+            learned_constraints,
+            f"coverage_{self.dataset}_{self.num_examples}.pl"
+        )
+        return learned_constraints
+    
+    def learn_levelwise(
+        self,
+        max_epochs: int = FLAGS.config.LEVELWISE_EPOCHS,
+        max_rules: Optional[int] = FLAGS.config.MAX_RULES,
+    ):
+        learned_rules: Set[Constraint] = set()
+        new_candidates: Set[sp.Expr] = set()
+        
+        predicates: Set[Constraint] = self.generate_predicates_and_prior()
+        valid_predicates, invalid_predicates = evaluate_predicates(predicates, self.examples)
+        log.info(f"Evaluated {len(predicates)} predicates: {len(valid_predicates)} valid, {len(invalid_predicates)} invalid.")
+        learned_rules |= valid_predicates
+        
+        #& Build pairwise implications
+        new_candidates = build_pairwise_implications(invalid_predicates)
+        log.info(f"Created {len(new_candidates)} pairwise implication candidates.")
+        
+        epoch = 1
+        learned_candidates: Set[sp.Expr] = set()
+        while epoch <= max_epochs and new_candidates:
+            print(f"\tEpoch {epoch}: {len(new_candidates)} candidates...")
+            
+            current_candidates = new_candidates
+            new_candidates = set()
+            prev_learned = len(learned_candidates)
+
+            nworkers = psutil.cpu_count()
+            chunks = np.array_split(list(current_candidates), nworkers)
+            args = [(i, chunk, self.examples) for i, chunk in enumerate(chunks)]
+            pool = Pool(nworkers)
+            results = pool.starmap(test_candidates, args)
+            # results = Parallel(n_jobs=nworkers, backend="loky")(
+            #     delayed(test_candidates)(i, chunk, self.examples)
+            #     for i, chunk in enumerate(chunks)
+            # )
+            valid_candidates = set().union(*results)
+            invalid_candidates = list(current_candidates - valid_candidates)
+            learned_candidates |= valid_candidates
+            total_learned = len(learned_candidates)
+            print(f"\tEpoch {epoch}: learned {total_learned-prev_learned} new rules, total {total_learned}.")
+            print(f"\tEpoch {epoch}: {len(invalid_candidates)} invalid candidates.")
+            
+            new_candidates = generalize_candidates(invalid_candidates)
+            print(f"\tEpoch {epoch}: {len(new_candidates)} new candidates generated.")
+            
+            if max_rules and len(total_learned) >= max_rules:
+                log.info(f"Reached max rules limit of {max_rules}. Stopping.")
+                break
+            epoch += 1
+
+        log.info(f"Learned {len(learned_rules)} rules in {epoch} epochs.")
+        prev_learned = len(learned_rules)
+        for candidate in tqdm(learned_candidates, desc="... Collecting learned candidates"):
+            learned_rules.add(Constraint(candidate))
+        num_redundant = (prev_learned + len(learned_candidates)) - len(learned_rules)
+        log.info(f"Removed {num_redundant} redundant rules.")
+        
+        learned_rules |= self.prior
+        log.info(f"Total {len(learned_rules)} rules (including prior).")
+        Theory.save_constraints(learned_rules, f'levelwise_{self.dataset}_{self.num_examples}_e{epoch}.pl')
+        return
     
     def build_evidence_set(self, predicates: Set[Constraint], save: bool = True) -> List[Set[Constraint]]:
         # Pre-pack predicates into a list so all workers use same reference
@@ -425,7 +659,9 @@ class LogicLearner(object):
 
         def _process_examples(worker_id, df_chunk: pd.DataFrame) -> List[Set[Constraint]]:
             chunk_results = []
-            for _, row in tqdm(df_chunk.iterrows(), total=df_chunk.shape[0], desc="... Building evidence sets"):
+            for _, row in tqdm(df_chunk.iterrows(), 
+                               total=df_chunk.shape[0], 
+                               desc=f"... Building evidence sets (worker {worker_id})"):
                 row_dict = row.to_dict()
                 satisfied = set()
                 for p in predicates_list:
@@ -436,7 +672,6 @@ class LogicLearner(object):
                         # Any substitution/eval failure = not satisfied
                         continue
                 chunk_results.append(satisfied)
-            log.info(f"Worker {worker_id} finished.")
             return chunk_results
 
         n_jobs = psutil.cpu_count()
@@ -451,16 +686,16 @@ class LogicLearner(object):
             for i, chunk in enumerate(chunks)
         )
         
+        results = [s for chunk in results for s in chunk]  # Flatten list of lists
         if save:
             with open(f"evidence_sets_{self.dataset}_{self.num_examples}.pkl", 'wb') as f:
                 pickle.dump(results, f)
                 log.info(f"Saved evidence sets to 'evidence_sets_{self.dataset}_{self.num_examples}.pkl'.")
 
-        # Flatten results (list of lists)
-        return [s for chunk in results for s in chunk]
+        return results
 
 
-    def generate_predicates(self) -> Set[Constraint]:
+    def generate_predicates_and_prior(self) -> Set[Constraint]:
         typed_variables, grouped_variables = group_variables_by_type(self.variables)
         
         prior_rules: Set[str] = set()

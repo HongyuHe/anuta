@@ -15,6 +15,7 @@ import json
 import warnings
 warnings.filterwarnings("ignore")
 
+from anuta.cli import FLAGS; FLAGS(sys.argv)
 from anuta.constructor import Constructor, Millisampler, Cidds001, Netflix, Cicids2017, Yatesbury, Mawi
 from anuta.tree import EntropyTreeLearner, XgboostTreeLearner, LightGbmTreeLearner
 from anuta.association import AssociationRuleLearner
@@ -22,7 +23,6 @@ from anuta.theory import Theory
 from anuta.miner import miner_versionspace, miner_valiant, validator
 from anuta.logic import LogicLearner
 from anuta.utils import log
-from anuta.cli import FLAGS
 
     
 def main(constructor: Constructor, refconstructor: Constructor, limit: int):
@@ -51,12 +51,11 @@ def main(constructor: Constructor, refconstructor: Constructor, limit: int):
         # miner_versionspace(constructor, refconstructor, limit)
         learner = LogicLearner(constructor, limit=limit)
         log.info("Learning constraints using logic programming...")
-        learner.learn_denial()
+        # learner.learn_denial()
+        learner.learn_levelwise_coverage()
         # learner.learn_levelwise()
 
 if __name__ == '__main__':
-    FLAGS(sys.argv)
-    
     assert '.csv' in FLAGS.data, "Data file is not CSV."
     data_label = FLAGS.data.split('/')[-1].split('.')[-2]
     dataset = FLAGS.dataset.lower()

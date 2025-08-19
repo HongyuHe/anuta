@@ -24,6 +24,8 @@ class ProofResult(Enum):
 class Constraint(object):
     #^ Can't inherit from sympy.Expr as it causes AttributeError on newly defined attributes.
     def __init__(self, expr: sp.Expr):
+        assert isinstance(expr, sp.Expr) or isinstance(expr, sp.logic.boolalg.Boolean),\
+            f"Expected sympy expression, got {type(expr)}: {expr}"
         # super().__init__()
         #* Semantic expression: original (sugared) formula for readability.
         self.expr: sp.Expr = expr
