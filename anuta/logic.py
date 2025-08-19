@@ -27,6 +27,20 @@ from anuta.cli import FLAGS
 
 cfg = FLAGS.config
 
+TYPE_PRIORITY = {
+    VariableType.IP: 40,
+    VariableType.PORT: 40,
+    VariableType.SEQUENCING: 30,
+    VariableType.FLAG: 40,
+    VariableType.PROTO: 30,
+    VariableType.POINTER: 2,
+    VariableType.TTL: 2,
+    VariableType.TIME: 2,
+    VariableType.SIZE: 1,
+    VariableType.WINDOW: 0,   # lowest priority
+    VariableType.UNKNOWN: 0,
+}
+
 def is_candidate_trivial(candidate: Constraint) -> bool:
     #* Candidate is trivial if it is a tautology or contradition, or not an implication (assuming not predicates).
     return candidate in [tautology, contradition] or not isinstance(candidate.expr, sp.Implies)
@@ -362,6 +376,8 @@ class LogicLearner(object):
         """
         if not evidence_sets:
             return []
+        
+        variable_types, _ = group_variables_by_type(self.variables)
 
         # Index: for each predicate, which evidence indices contain it?
         log.info("Indexing predicates in evidence sets...")
@@ -374,10 +390,29 @@ class LogicLearner(object):
         E_list: List[List[Constraint]] = [list(E) for E in evidence_sets]
 
         # pred_order = [p for p, _ in idx_by_pred.items()]
-        #* Optional predicate ordering: higher coverage first (helps pruning) [Chu et al., VLDB '13]
-        log.info("Ordering predicates by coverage...")
-        pred_by_cov = sorted(idx_by_pred.items(), key=lambda kv: -len(kv[1]))
-        pred_order = [p for p, _ in pred_by_cov]
+        
+        log.info("Ordering predicates...")
+        #* Predicate ordering: higher type priority first, then higher coverage
+        def _get_pred_score(p: Constraint, covered_examples):
+            cov = len(covered_examples)
+            type_score = max(
+                TYPE_PRIORITY.get(variable_types.get(str(var), VariableType.UNKNOWN), 1)
+                for var in p.expr.free_symbols
+            )
+            return (type_score, cov)
+        
+        pred_by_score = sorted(
+            idx_by_pred.items(),
+            key=lambda kv: (-_get_pred_score(kv[0], kv[1])[0],   # higher type priority first
+                            # -_get_pred_score(kv[0], kv[1])[1]    # then higher coverage
+                        )
+        )
+        pred_order = [p for p, _ in pred_by_score]
+        
+        # #* Predicate ordering: higher coverage first (helps pruning) [Chu et al., VLDB '13]
+        # log.info("Ordering predicates by coverage...")
+        # pred_by_cov = sorted(idx_by_pred.items(), key=lambda kv: -len(kv[1]))
+        # pred_order = [p for p, _ in pred_by_cov]
 
         solutions: List[frozenset[Constraint]] = []
 
@@ -431,21 +466,29 @@ class LogicLearner(object):
             # Covered all evidences? record a minimal solution
             if covered == FULL:
                 fc = frozenset(chosen)
-                # Keep only minimal solutions: drop any existing supersets
+
+                # --- compute new solution set and net change ---
+                old_len = len(solutions)
                 keep: List[frozenset[Constraint]] = []
                 for s in solutions:
                     if s.issubset(fc):
-                        # existing is smaller/equal; then current can't be minimal if strictly superset
+                        # existing is smaller/equal → new is not minimal
                         if s != fc:
                             return
                     elif fc.issubset(s):
-                        # new is smaller; drop the old superset
+                        # new is smaller → drop the old superset
                         continue
                     keep.append(s)
+
+                #* Replace in place to preserve references
                 solutions.clear()
                 solutions.extend(keep)
                 solutions.append(fc)
-                progress.update(1)
+
+                new_len = len(solutions)
+                delta = new_len - old_len
+                #* delta can be negative when we prune supersets.
+                progress.update(delta)
 
                 # Optional cap
                 if max_solutions is not None and len(solutions) >= max_solutions:
@@ -467,12 +510,30 @@ class LogicLearner(object):
 
             #* Branch on the uncovered evidence covered by fewest predicates (fail-first)
             pivot = _pick_uncovered_with_smallest_branch(uncovered, chosen)
-            #* Order candidate predicates by descending marginal gain
-            #*  where gain is the number of uncovered evidences they cover.
+            # #* Order candidate predicates by descending marginal gain
+            # #*  where gain is the number of uncovered evidences they cover.
+            # predicates = sorted(
+            #     E_list[pivot],
+            #     key=lambda p: -len((idx_by_pred[p]) & uncovered)
+            # )
+            #* Order candidate predicates by descending score
+            def _predicate_type_priority(p: Constraint) -> int:
+                vars_in_p = [str(v) for v in p.expr.free_symbols]
+                if not vars_in_p:
+                    return 1  # fallback
+                return max(
+                    TYPE_PRIORITY.get(variable_types.get(var, VariableType.UNKNOWN), 1)
+                    for var in vars_in_p
+                )
+
             predicates = sorted(
                 E_list[pivot],
-                key=lambda p: -len((idx_by_pred[p]) & uncovered)
+                key=lambda p: (
+                    -_predicate_type_priority(p),            # prioritize by type
+                    # -len((idx_by_pred[p]) & uncovered)      # then by coverage gain
+                )
             )
+
 
             for p in predicates:
                 if p in chosen:
@@ -805,6 +866,11 @@ class LogicLearner(object):
                         #? Since we don't care equality (X=c), we omit the following:
                         # predicates.add(f"({lhs} <= {constant})")
                         # predicates.add(f"({lhs} > {constant})")
+                #TODO: Enable one var with multiple types of constants.
+                #*  Here, ACK and SEQ numbers require ADDITION (+1) and LIMIT (<1).
+                if vtype_lhs == VariableType.SEQUENCING:
+                    predicates.add(f"({lhs} > 1)")
+                    predicates.add(f"({lhs} <= 1)")
             
             #* Allow all types of variables in the RHS.
             #! Order matters with `j`
@@ -871,7 +937,9 @@ class LogicLearner(object):
                 self.examples[predicate] = predicate_values
                 predicates.add(predicate)
                 
-                if domaintype_lhs == DomainType.NUMERICAL:
+                if (domaintype_lhs == DomainType.NUMERICAL 
+                    #* Doesn't make sense to compare sequencing variables other than equality.
+                    and vtype_lhs != VariableType.SEQUENCING):
                     assert domaintype_rhs == DomainType.NUMERICAL, \
                         "LHS and RHS must have the same domain type."
                     #& Comparison predicates: A>B
@@ -906,14 +974,15 @@ class LogicLearner(object):
                 self.categoricals.remove(var)
                 
         for varname in self.variables:
-            domaintype = TYPE_DOMIAN[variable_types[varname]]
+            vtype = variable_types[varname]
+            domaintype = TYPE_DOMIAN[vtype]
             if domaintype == DomainType.NUMERICAL:
                 bounds = self.domains[varname].bounds
                 prior_rules.add(f"({varname}>={bounds.lb})")
                 prior_rules.add(f"({varname}<={bounds.ub})")
                 
-                #& Add default predicate X>0 if the domain contains 0.
-                if bounds.lb <= 0 <= bounds.ub:
+                #& Add default predicate X>0 if the domain contains 0 (except for ack and seq which already have >1).
+                if bounds.lb <= 0 <= bounds.ub and vtype != VariableType.SEQUENCING:
                     #* Add X>0 as a default if the domain contains 0.
                     predicate = f"({varname}>0)"
                     predicate_values = (self.examples[varname]>0).astype(int)
