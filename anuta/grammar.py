@@ -125,14 +125,14 @@ def type_variables(var_list: List[str]) -> Dict[VariableType, List[str]]:
     return dict(groups)
 
 
-def group_variables_by_type(var_list: List[str]) -> Tuple[
-    Dict[str, List[str]], Dict[str, List[str]]
-]:
+def group_variables_by_type_and_domain(var_list: List[str]) -> Tuple[
+    Dict[VariableType, List[str]], Dict[str, List[str]]]:
     typed = type_variables(var_list)
     grouped = defaultdict(list)
     for vtype, vars in typed.items():
         kind = TYPE_DOMIAN[vtype]
         grouped[kind].extend(vars)
+    
     return typed, dict(grouped)
 
 class Anuta(object):

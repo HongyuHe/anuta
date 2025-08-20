@@ -10,7 +10,7 @@ import sys
 
 from anuta.grammar import (
     Bounds, Anuta, Domain, DomainType, ConstantType, Constants, VariableType, 
-    TYPE_DOMIAN, group_variables_by_type)
+    TYPE_DOMIAN, group_variables_by_type_and_domain)
 from anuta.known import *
 from anuta.utils import *
 from anuta.cli import FLAGS
@@ -87,7 +87,7 @@ class Constructor(object):
         avars: Set[str] = set()
         variable_types = {}
         prior_rules: Set[str] = set()
-        typed_variables, grouped_variables = group_variables_by_type(variables)
+        typed_variables, grouped_variables = group_variables_by_type_and_domain(variables)
         # pprint(typed_variables)
         # pprint(grouped_variables)
         categoricals = []
@@ -544,7 +544,7 @@ class Mawi(Constructor):
         # self.df = self.df[self.categoricals]
         # variables = self.categoricals
         
-        _, grouped_vars = group_variables_by_type(variables)
+        _, grouped_vars = group_variables_by_type_and_domain(variables)
         self.categoricals = grouped_vars[DomainType.CATEGORICAL]
         
         domains = {}
@@ -647,7 +647,7 @@ class Netflix(Constructor):
         # self.df = self.df[self.categoricals]
         # variables = self.categoricals
         
-        _, grouped_vars = group_variables_by_type(variables)
+        _, grouped_vars = group_variables_by_type_and_domain(variables)
         self.categoricals = grouped_vars[DomainType.CATEGORICAL]
         
         domains = {}

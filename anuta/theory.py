@@ -160,7 +160,7 @@ class Theory(object):
     
     def z3proves(self, query, verbose=True) -> ProofResult:
         """Try to prove the given claim."""
-        query = eval(str(sp.sympify(query)), z3evalmap)
+        query = eval(str(clausify(query)), z3evalmap)
         if verbose:
             display(query)
             

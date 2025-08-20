@@ -14,12 +14,15 @@ from enum import Enum, auto
 from rich import print as pprint
 import pickle
 import warnings
-
-from tqdm import tqdm
 warnings.filterwarnings("ignore")
+from tqdm import tqdm
+import sys
+sys.setrecursionlimit(100_000)
+
 
 from anuta.grammar import (
-    TYPE_DOMIAN, ConstantType, DomainType, VariableType, group_variables_by_type, tautology, contradition)
+    TYPE_DOMIAN, ConstantType, DomainType, VariableType, 
+    group_variables_by_type_and_domain, get_variable_type, tautology, contradition)
 from anuta.utils import log
 from anuta.theory import Constraint, Theory
 from anuta.constructor import Constructor
@@ -34,9 +37,9 @@ TYPE_PRIORITY = {
     VariableType.FLAG: 40,
     VariableType.PROTO: 30,
     VariableType.POINTER: 2,
-    VariableType.TTL: 2,
     VariableType.TIME: 2,
     VariableType.SIZE: 1,
+    VariableType.TTL: 0,
     VariableType.WINDOW: 0,   # lowest priority
     VariableType.UNKNOWN: 0,
 }
@@ -277,6 +280,10 @@ class LogicLearner(object):
         self.variables: List[str] = [
             var for var in self.examples.columns
         ]
+        #* Variables -> their types.
+        self.vtypes: Dict[str, VariableType] = {}
+        for var in self.variables:
+            self.vtypes[var] = get_variable_type(var)
         self.domains = constructor.anuta.domains
         self.constants = constructor.anuta.constants
         
@@ -294,7 +301,8 @@ class LogicLearner(object):
         3) Enumerate all minimal hitting sets with bounded DFS/BnB.
         4) Return rules: Or(*[p in cover]) (instead of Denial constraints And(*[¬p in cover])).
         """
-        predicates: Set[Constraint] = self.generate_predicates_and_prior()
+        log.info(f"Learning denial constraints: Max {max_predicates} predicates, Max {max_learned_rules} rules.")
+        
         #* First check if the evidence sets file exists, if so, load it.
         evidence_sets_file = f'data/evidence_sets_{self.dataset}_{self.num_examples}.pkl'
         if Path(evidence_sets_file).exists():
@@ -303,6 +311,7 @@ class LogicLearner(object):
                 evidence_sets: List[frozenset[Constraint]] = pickle.load(f)
             log.info(f"Loaded {len(evidence_sets)} evidence sets.")
         else:
+            predicates: Set[Constraint] = self.generate_predicates_and_prior()
             start = perf_counter()
             evidence_sets: List[frozenset[Constraint]] = self.build_evidence_set(predicates)
             end = perf_counter()
@@ -377,42 +386,47 @@ class LogicLearner(object):
         if not evidence_sets:
             return []
         
-        variable_types, _ = group_variables_by_type(self.variables)
-
         # Index: for each predicate, which evidence indices contain it?
-        log.info("Indexing predicates in evidence sets...")
         idx_by_pred: Dict[Constraint, Set[int]] = defaultdict(set)
-        for i, E in enumerate(evidence_sets):
+        for i, E in enumerate(tqdm(evidence_sets, desc="... Indexing predicates in evidence sets")):
             for p in E:
                 idx_by_pred[p].add(i)
 
+        #* Filter out predicates with WINDOW or SIZE variables for testing.
+        for predicate in list(idx_by_pred.keys()):
+            variables = predicate.expr.free_symbols
+            if any(self.vtypes[str(v)] in [VariableType.WINDOW, VariableType.SIZE] 
+                    for v in variables):
+                del idx_by_pred[predicate]
+                
         # Precompute each evidence set as a list to iterate deterministically
         E_list: List[List[Constraint]] = [list(E) for E in evidence_sets]
 
-        # pred_order = [p for p, _ in idx_by_pred.items()]
         
         log.info("Ordering predicates...")
-        #* Predicate ordering: higher type priority first, then higher coverage
-        def _get_pred_score(p: Constraint, covered_examples):
-            cov = len(covered_examples)
-            type_score = max(
-                TYPE_PRIORITY.get(variable_types.get(str(var), VariableType.UNKNOWN), 1)
-                for var in p.expr.free_symbols
-            )
-            return (type_score, cov)
+        # pred_order = [p for p, _ in idx_by_pred.items()]
         
-        pred_by_score = sorted(
-            idx_by_pred.items(),
-            key=lambda kv: (-_get_pred_score(kv[0], kv[1])[0],   # higher type priority first
-                            # -_get_pred_score(kv[0], kv[1])[1]    # then higher coverage
-                        )
-        )
-        pred_order = [p for p, _ in pred_by_score]
+        # #* Predicate ordering: higher type priority first, then higher coverage
+        # def _get_pred_score(p: Constraint, covered_examples):
+        #     cov = len(covered_examples)
+        #     type_score = max(
+        #         TYPE_PRIORITY.get(self.vtypes[str(var)], 0)
+        #         for var in p.expr.free_symbols
+        #     )
+        #     return (type_score, cov)
         
-        # #* Predicate ordering: higher coverage first (helps pruning) [Chu et al., VLDB '13]
-        # log.info("Ordering predicates by coverage...")
-        # pred_by_cov = sorted(idx_by_pred.items(), key=lambda kv: -len(kv[1]))
-        # pred_order = [p for p, _ in pred_by_cov]
+        # pred_by_score = sorted(
+        #     idx_by_pred.items(),
+        #     key=lambda kv: (-_get_pred_score(kv[0], kv[1])[0],   # higher type priority first
+        #                     # -_get_pred_score(kv[0], kv[1])[1]    # then higher coverage
+        #                 )
+        # )
+        # pred_order = [p for p, _ in pred_by_score]
+        
+        #* Predicate ordering: higher coverage first (helps pruning) [Chu et al., VLDB '13]
+        log.info("Ordering predicates by coverage...")
+        pred_by_cov = sorted(idx_by_pred.items(), key=lambda kv: -len(kv[1]))
+        pred_order = [p for p, _ in pred_by_cov]
 
         solutions: List[frozenset[Constraint]] = []
 
@@ -510,29 +524,30 @@ class LogicLearner(object):
 
             #* Branch on the uncovered evidence covered by fewest predicates (fail-first)
             pivot = _pick_uncovered_with_smallest_branch(uncovered, chosen)
-            # #* Order candidate predicates by descending marginal gain
-            # #*  where gain is the number of uncovered evidences they cover.
-            # predicates = sorted(
-            #     E_list[pivot],
-            #     key=lambda p: -len((idx_by_pred[p]) & uncovered)
-            # )
-            #* Order candidate predicates by descending score
-            def _predicate_type_priority(p: Constraint) -> int:
-                vars_in_p = [str(v) for v in p.expr.free_symbols]
-                if not vars_in_p:
-                    return 1  # fallback
-                return max(
-                    TYPE_PRIORITY.get(variable_types.get(var, VariableType.UNKNOWN), 1)
-                    for var in vars_in_p
-                )
-
+            
+            #* Order candidate predicates by descending marginal gain
+            #*  where gain is the number of uncovered evidences they cover.
             predicates = sorted(
                 E_list[pivot],
-                key=lambda p: (
-                    -_predicate_type_priority(p),            # prioritize by type
-                    # -len((idx_by_pred[p]) & uncovered)      # then by coverage gain
-                )
+                key=lambda p: -len((idx_by_pred[p]) & uncovered)
             )
+            
+            # #* Order candidate predicates by descending score
+            # def _predicate_type_priority(p: Constraint) -> int:
+            #     vars_in_p = [str(v) for v in p.expr.free_symbols]
+            #     if not vars_in_p:
+            #         return 1  # fallback
+            #     return max(
+            #         TYPE_PRIORITY.get(self.vtypes[var], 0)
+            #         for var in vars_in_p
+            #     )
+            # predicates = sorted(
+            #     E_list[pivot],
+            #     key=lambda p: (
+            #         -_predicate_type_priority(p),            # prioritize by type
+            #         # -len((idx_by_pred[p]) & uncovered)      # then by coverage gain
+            #     )
+            # )
 
 
             for p in predicates:
@@ -758,11 +773,12 @@ class LogicLearner(object):
 
 
     def generate_predicates_and_prior(self) -> Set[Constraint]:
-        typed_variables, grouped_variables = group_variables_by_type(self.variables)
+        vtype2vars, domaintype2vars = group_variables_by_type_and_domain(self.variables)
+        variable_types = self.vtypes
         
         prior_rules: Set[str] = set()
         #* Collecting categorical variables (with >1 unique value).
-        for varname in grouped_variables[DomainType.CATEGORICAL]:
+        for varname in domaintype2vars[DomainType.CATEGORICAL]:
             if self.examples[varname].nunique() > 1:
                 #* Only consider categorical variables with more than one unique value.
                 self.categoricals.append(varname)
@@ -772,11 +788,6 @@ class LogicLearner(object):
                 varval = self.examples[varname].iloc[0].item()
                 prior_rules.add(f"Eq({varname}, {varval})")
                 
-        #* Variables -> their types.
-        variable_types = {}
-        for vtype, tvars in typed_variables.items():
-            for varname in tvars:
-                variable_types[varname] = vtype
         
         '''Augment the variables with constants.'''
         avars = set()
@@ -808,13 +819,13 @@ class LogicLearner(object):
         
         '''Compound variables'''
         #& All pairs of X+Y and (some) X*Y
-        for vtype in typed_variables:
+        for vtype in vtype2vars:
             domaintype = TYPE_DOMIAN[vtype]
             if domaintype != DomainType.NUMERICAL: 
                 #* Only augment numerical vars.
                 continue
             
-            numericals = typed_variables[vtype]
+            numericals = vtype2vars[vtype]
             for i, var1 in enumerate(numericals):
                 for var2 in numericals[i+1:]:
                     if var1 == var2: continue
@@ -838,6 +849,9 @@ class LogicLearner(object):
             vtype_lhs = variable_types[lhs]
             domaintype_lhs = TYPE_DOMIAN[vtype_lhs]
             lhs_vars = set([lhs])
+            
+            # if vtype_lhs == VariableType.WINDOW:
+            #     continue
             
             #& Predicates with constants.
             if domaintype_lhs == DomainType.CATEGORICAL:
@@ -966,7 +980,7 @@ class LogicLearner(object):
         '''Add domain constraints to prior rules.'''
         self.examples = self.examples[self.variables]
         #* First drop identifiers
-        identifiers = typed_variables[VariableType.IP]+typed_variables[VariableType.PORT]
+        identifiers = vtype2vars[VariableType.IP]+vtype2vars[VariableType.PORT]
         for var in identifiers:
             if var in self.variables:
                 self.variables.remove(var)
