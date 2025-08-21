@@ -603,6 +603,9 @@ class LogicLearner(object):
                 suppression_combos.append(set(combo))
         log.info(f"Launching searches with {len(suppression_combos)} suppression sets.")
         
+        #* Sort the combos from largest to smallest (suppressing more types first)
+        suppression_combos.sort(key=lambda s: -len(s))
+        
         # Build idx_by_pred (same for all runs)
         idx_by_pred: Dict[Constraint, Set[int]] = defaultdict(set)
         for i, E in enumerate(tqdm(evidence_sets, desc="... Indexing predicates in evidence sets")):
