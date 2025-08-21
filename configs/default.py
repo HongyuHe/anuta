@@ -4,8 +4,8 @@ from ml_collections import config_dict
 def get_config():
     default_config = config_dict.ConfigDict()
     
-    default_config.MAX_PREDICATES = 8  #* Maximum number of predicates in a rule
-    default_config.MAX_RULES = 1_000  #* Maximum number of rules to learn
+    default_config.MAX_PREDICATES = 12  #* Maximum number of predicates in a rule
+    default_config.MAX_RULES = 100  #* Maximum number of rules to learn
     default_config.LEVELWISE_EPOCHS = 10  #* Number of epochs for levelwise learning
     
     '''Tree leaning configuration'''

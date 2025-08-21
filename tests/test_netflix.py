@@ -34,7 +34,7 @@ def theory() -> Theory:
     # modelpath = 'lgbm_netflix_all.pl'
     # modelpath = 'xgb_netflix_all.pl'
     # modelpath = 'dt_netflix_all.pl'
-    modelpath = 'denial_netflix_all_p12.pl'
+    modelpath = 'denial_netflix_all_p8.pl'
     return Theory(modelpath)
 
 def test_netflix(

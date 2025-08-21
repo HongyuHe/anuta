@@ -329,7 +329,7 @@ class LogicLearner(object):
         #     max_size=max_predicates,
         #     max_solutions=max_learned_rules,
         # )
-        covers = self.enumerate_minimal_hitting_sets_stack(
+        covers = self.enumerate_minimal_hitting_sets_suppression(
             evidence_sets=evidence_sets,
             max_size=max_predicates,
             max_solutions=max_learned_rules,
@@ -579,6 +579,159 @@ class LogicLearner(object):
         # Convert back to list[set]
         return [set(s) for s in solutions]
 
+
+    def enumerate_minimal_hitting_sets_suppression(
+        self,
+        evidence_sets: List[frozenset[Constraint]],
+        max_size: Optional[int] = None,
+        max_solutions: Optional[int] = None,
+    ) -> List[Set[Constraint]]:
+        """
+        Enumerate all minimal hitting sets H such that ∀E in evidence_sets: H ∩ E ≠ ∅.
+        Iterative stack-based DFS (no recursion).
+        Runs multiple searches with different suppression subsets of variable types,
+        combining results with global pruning for maximum diversity.
+        """
+        if not evidence_sets:
+            return []
+
+        # All suppression type combinations (power set of surpressed_vtypes)
+        vtypes = [vtype for vtype in VariableType if vtype not in [VariableType.UNKNOWN]]
+        suppression_combos = []
+        for r in range(len(vtypes) + 1):
+            for combo in combinations(vtypes, r):
+                suppression_combos.append(set(combo))
+        log.info(f"Launching searches with {len(suppression_combos)} suppression sets.")
+        
+        # Build idx_by_pred (same for all runs)
+        idx_by_pred: Dict[Constraint, Set[int]] = defaultdict(set)
+        for i, E in enumerate(tqdm(evidence_sets, desc="... Indexing predicates in evidence sets")):
+            for p in E:
+                idx_by_pred[p].add(i)
+        E_list: List[List[Constraint]] = [list(E) for E in evidence_sets]
+        FULL = set(range(len(E_list)))
+
+        # Global solutions across all runs
+        global_solutions: List[frozenset[Constraint]] = []
+
+        def _dominated_by_existing(chosen: Set[Constraint]) -> bool:
+            fc = frozenset(chosen)
+            for sol in global_solutions:
+                if sol.issubset(fc):  # superset of existing
+                    return True
+            return False
+
+        def _optimistic_lb(uncovered: Set[int]) -> int:
+            if not uncovered:
+                return 0
+            best_gain = 0
+            for p in idx_by_pred:
+                gain = len(uncovered & idx_by_pred[p])
+                if gain > best_gain:
+                    best_gain = gain
+                    if best_gain == len(uncovered):
+                        break
+            return 1 if best_gain == 0 else ((len(uncovered) + best_gain - 1) // best_gain)
+
+        def _pick_uncovered_with_smallest_branch(uncovered: Set[int]) -> int:
+            best_i, best_deg = None, float('inf')
+            for i in uncovered:
+                deg = len(E_list[i])
+                if deg < best_deg:
+                    best_deg, best_i = deg, i
+            return best_i
+
+        # Run one search with a suppression set
+        def run_search(suppressed: Set[VariableType]):
+            # log.info(f"Searching with surpressed vtypes:\n{suppressed}...")
+            allowed_predicates = set(
+                p for p in idx_by_pred
+                if all(self.vtypes[str(v)] not in suppressed for v in p.expr.free_symbols)
+            )
+
+            solutions_this_run: List[frozenset[Constraint]] = []
+
+            stack = [(set(), set(), FULL, None, 0)]
+
+            while stack:
+                chosen, covered, uncovered, candidates, next_idx = stack.pop()
+
+                # Fully covered
+                if not uncovered:
+                    fc = frozenset(chosen)
+                    if not _dominated_by_existing(fc):
+                        # prune global supersets and add
+                        keep = []
+                        for s in global_solutions:
+                            if s.issubset(fc):
+                                if s != fc:
+                                    break
+                            elif fc.issubset(s):
+                                continue  # drop superset
+                            keep.append(s)
+                        else:
+                            global_solutions.clear()
+                            global_solutions.extend(keep)
+                            global_solutions.append(fc)
+
+                            solutions_this_run.append(fc)
+                            progress.update(1)
+                            if max_solutions and len(solutions_this_run) >= max_solutions:
+                                # progress.close()
+                                return
+
+                    continue
+
+                # Bound by size
+                if max_size is not None and len(chosen) >= max_size:
+                    continue
+
+                # BnB optimistic bound
+                if max_size is not None:
+                    lb = _optimistic_lb(uncovered)
+                    if len(chosen) + lb > max_size:
+                        continue
+
+                # Load candidates if first time
+                if candidates is None:
+                    pivot = _pick_uncovered_with_smallest_branch(uncovered)
+                    candidates = [p for p in E_list[pivot] if p in allowed_predicates]
+                    # sort by coverage gain
+                    candidates = sorted(candidates, key=lambda p: -len((idx_by_pred[p]) & uncovered))
+                    next_idx = 0
+
+                if next_idx >= len(candidates):
+                    continue
+
+                # Push frame back
+                stack.append((chosen, covered, uncovered, candidates, next_idx + 1))
+
+                p = candidates[next_idx]
+                if p in chosen:
+                    new_chosen, new_covered = chosen, covered
+                else:
+                    new_chosen = set(chosen)
+                    new_chosen.add(p)
+                    new_covered = covered | idx_by_pred[p]
+
+                if _dominated_by_existing(new_chosen):
+                    continue
+
+                new_uncovered = uncovered - idx_by_pred[p]
+                stack.append((new_chosen, new_covered, new_uncovered, None, 0))
+
+            # progress.close()
+            return
+
+        progress = tqdm(desc=f"... Enumerating hitting sets (max_size={max_size})",
+                        unit=" sets", total=max_solutions*len(suppression_combos))
+        # Run searches for all suppression combos
+        for suppressed in suppression_combos:
+            run_search(suppressed)
+        progress.close()
+
+        return [set(s) for s in global_solutions]
+
     def enumerate_minimal_hitting_sets_stack(
         self,
         evidence_sets: List[frozenset[Constraint]],
@@ -592,18 +745,27 @@ class LogicLearner(object):
         if not evidence_sets:
             return []
         
+        surpressed_vtypes = [VariableType.WINDOW, VariableType.SIZE]
+        allowed_predicates: Set[Constraint] = set()
         # Index: for each predicate, which evidence indices contain it
         idx_by_pred: Dict[Constraint, Set[int]] = defaultdict(set)
         for i, E in enumerate(tqdm(evidence_sets, desc="... Indexing predicates in evidence sets")):
             for p in E:
                 idx_by_pred[p].add(i)
+                allowed_predicates.add(p)
+                
+        allowed_predicates = set(filter(
+            lambda p: self.vtypes[str(p.expr.free_symbols.pop())] not in surpressed_vtypes,
+            allowed_predicates
+        ))
 
-        #* Filter out predicates with WINDOW or SIZE variables for testing.
-        for predicate in list(idx_by_pred.keys()):
-            variables = predicate.expr.free_symbols
-            if any(self.vtypes[str(v)] in [VariableType.WINDOW, VariableType.SIZE] 
-                    for v in variables):
-                del idx_by_pred[predicate]
+        # #* Filter out predicates with WINDOW or SIZE variables for testing.
+        # for predicate in list(idx_by_pred.keys()):
+        #     variables = predicate.expr.free_symbols
+        #     if any(self.vtypes[str(v)] in [VariableType.WINDOW, VariableType.SIZE] 
+        #             for v in variables):
+        #         print(f"Removing predicate {predicate} with variables {variables} for testing.")
+        #         del idx_by_pred[predicate]
 
         # Evidence sets as lists
         E_list: List[List[Constraint]] = [list(E) for E in evidence_sets]
@@ -674,7 +836,6 @@ class LogicLearner(object):
 
         while stack:
             chosen, covered, uncovered, candidates, next_idx = stack.pop()
-            
             # if len(stack) > 1000:
             #     # print(f"Stack depth: {len(stack)} frames, skipping further checks.")
             #     continue  # too deep, skip this frame
@@ -721,7 +882,6 @@ class LogicLearner(object):
                     E_list[pivot],
                     key=lambda p: -len((idx_by_pred[p]) & uncovered)
                 )
-                
                 # predicates = sorted(
                 #     E_list[pivot],
                 #     key=lambda p: (
@@ -731,6 +891,8 @@ class LogicLearner(object):
                 # )
                 
                 candidates, next_idx = predicates, 0
+                #* Filter candidates to only those that are allowed
+                candidates = [p for p in candidates if p in allowed_predicates]
 
             # If we exhausted candidates, skip
             if next_idx >= len(candidates):
