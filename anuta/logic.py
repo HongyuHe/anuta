@@ -302,6 +302,7 @@ class LogicLearner(object):
         4) Return rules: Or(*[p in cover]) (instead of Denial constraints And(*[¬p in cover])).
         """
         log.info(f"Learning denial constraints: Max {max_predicates} predicates, Max {max_learned_rules} rules.")
+        predicates: Set[Constraint] = self.generate_predicates_and_prior()
         
         #* First check if the evidence sets file exists, if so, load it.
         evidence_sets_file = f'data/evidence_sets_{self.dataset}_{self.num_examples}.pkl'
@@ -311,7 +312,6 @@ class LogicLearner(object):
                 evidence_sets: List[frozenset[Constraint]] = pickle.load(f)
             log.info(f"Loaded {len(evidence_sets)} evidence sets.")
         else:
-            predicates: Set[Constraint] = self.generate_predicates_and_prior()
             start = perf_counter()
             evidence_sets: List[frozenset[Constraint]] = self.build_evidence_set(predicates)
             end = perf_counter()
@@ -324,16 +324,16 @@ class LogicLearner(object):
             log.warning("No non-empty evidence sets were produced; returning only prior.")
 
         start = perf_counter()
-        covers = self.enumerate_minimal_hitting_sets(
+        # covers = self.enumerate_minimal_hitting_sets(
+        #     evidence_sets=evidence_sets,
+        #     max_size=max_predicates,
+        #     max_solutions=max_learned_rules,
+        # )
+        covers = self.enumerate_minimal_hitting_sets_stack(
             evidence_sets=evidence_sets,
             max_size=max_predicates,
             max_solutions=max_learned_rules,
         )
-        # covers = self.enumerate_minimal_hitting_sets_parallel(
-        #     evidence_sets=evidence_sets,
-        #     max_size=max_size,
-        #     max_solutions=max_solutions,
-        # )
         end = perf_counter()
         log.info(f"Enumerated {len(covers)} minimal hitting sets in {end - start:.2f} seconds.")
         
@@ -392,21 +392,21 @@ class LogicLearner(object):
             for p in E:
                 idx_by_pred[p].add(i)
 
-        #* Filter out predicates with WINDOW or SIZE variables for testing.
-        for predicate in list(idx_by_pred.keys()):
-            variables = predicate.expr.free_symbols
-            if any(self.vtypes[str(v)] in [VariableType.WINDOW, VariableType.SIZE] 
-                    for v in variables):
-                del idx_by_pred[predicate]
+        # #* Filter out predicates with WINDOW or SIZE variables for testing.
+        # for predicate in list(idx_by_pred.keys()):
+        #     variables = predicate.expr.free_symbols
+        #     if any(self.vtypes[str(v)] in [VariableType.WINDOW, VariableType.SIZE] 
+        #             for v in variables):
+        #         del idx_by_pred[predicate]
                 
         # Precompute each evidence set as a list to iterate deterministically
         E_list: List[List[Constraint]] = [list(E) for E in evidence_sets]
 
         
-        log.info("Ordering predicates...")
         # pred_order = [p for p, _ in idx_by_pred.items()]
         
         # #* Predicate ordering: higher type priority first, then higher coverage
+        # log.info("Ordering predicates by type...")
         # def _get_pred_score(p: Constraint, covered_examples):
         #     cov = len(covered_examples)
         #     type_score = max(
@@ -470,6 +470,16 @@ class LogicLearner(object):
                     best_deg = deg
                     best_i = i
             return best_i  # index in E_list
+        
+        def _predicate_type_priority(p: Constraint) -> int:
+            #TODO: Only need the first var since all vars in a predicate have the same type.
+            vars_in_p = [str(v) for v in p.expr.free_symbols]
+            if not vars_in_p:
+                return 1  # fallback
+            return max(
+                TYPE_PRIORITY.get(self.vtypes[var], 0)
+                for var in vars_in_p
+            )
 
         # DFS
         def dfs(chosen: Set[Constraint], covered: Set[int]):
@@ -533,14 +543,6 @@ class LogicLearner(object):
             )
             
             # #* Order candidate predicates by descending score
-            # def _predicate_type_priority(p: Constraint) -> int:
-            #     vars_in_p = [str(v) for v in p.expr.free_symbols]
-            #     if not vars_in_p:
-            #         return 1  # fallback
-            #     return max(
-            #         TYPE_PRIORITY.get(self.vtypes[var], 0)
-            #         for var in vars_in_p
-            #     )
             # predicates = sorted(
             #     E_list[pivot],
             #     key=lambda p: (
@@ -576,6 +578,187 @@ class LogicLearner(object):
 
         # Convert back to list[set]
         return [set(s) for s in solutions]
+
+    def enumerate_minimal_hitting_sets_stack(
+        self,
+        evidence_sets: List[frozenset[Constraint]],
+        max_size: Optional[int] = None,
+        max_solutions: Optional[int] = None,
+    ) -> List[Set[Constraint]]:
+        """
+        Enumerate all minimal hitting sets H such that ∀E in evidence_sets: H ∩ E ≠ ∅.
+        Iterative stack-based DFS (no recursion).
+        """
+        if not evidence_sets:
+            return []
+        
+        # Index: for each predicate, which evidence indices contain it
+        idx_by_pred: Dict[Constraint, Set[int]] = defaultdict(set)
+        for i, E in enumerate(tqdm(evidence_sets, desc="... Indexing predicates in evidence sets")):
+            for p in E:
+                idx_by_pred[p].add(i)
+
+        #* Filter out predicates with WINDOW or SIZE variables for testing.
+        for predicate in list(idx_by_pred.keys()):
+            variables = predicate.expr.free_symbols
+            if any(self.vtypes[str(v)] in [VariableType.WINDOW, VariableType.SIZE] 
+                    for v in variables):
+                del idx_by_pred[predicate]
+
+        # Evidence sets as lists
+        E_list: List[List[Constraint]] = [list(E) for E in evidence_sets]
+
+        #* Predicate ordering: higher coverage first (Chu et al. 2013)
+        log.info("Ordering predicates by coverage...")
+        pred_by_cov = sorted(idx_by_pred.items(), key=lambda kv: -len(kv[1]))
+        pred_order = [p for p, _ in pred_by_cov]
+        
+        # #* Predicate ordering: higher type priority first, then higher coverage
+        # log.info("Ordering predicates by type...")
+        # def _get_pred_score(p: Constraint, covered_examples):
+        #     cov = len(covered_examples)
+        #     var = p.expr.free_symbols.pop()
+        #     type_score = TYPE_PRIORITY.get(self.vtypes[str(var)], 0)
+        #     return (type_score, cov)
+        
+        # pred_by_score = sorted(
+        #     idx_by_pred.items(),
+        #     key=lambda kv: (-_get_pred_score(kv[0], kv[1])[0],   # higher type priority first
+        #                     # -_get_pred_score(kv[0], kv[1])[1]    # then higher coverage
+        #                 )
+        # )
+        # pred_order = [p for p, _ in pred_by_score]
+
+        solutions: List[frozenset[Constraint]] = []
+        FULL = set(range(len(E_list)))
+
+        # --- Helpers ---
+        #* Order candidate predicates by descending score
+        def _predicate_type_priority(p: Constraint) -> int:
+            #TODO: Only need the first var since all vars in a predicate have the same type.
+            var = p.expr.free_symbols.pop()
+            return TYPE_PRIORITY.get(self.vtypes[str(var)], 0)
+            
+        def _dominated_by_existing(chosen: Set[Constraint]) -> bool:
+            fc = frozenset(chosen)
+            for sol in solutions:
+                if sol.issubset(fc):  # superset of existing
+                    return True
+            return False
+
+        def _optimistic_lb(uncovered: Set[int]) -> int:
+            if not uncovered:
+                return 0
+            best_gain = 0
+            for p in pred_order:
+                gain = len(uncovered & idx_by_pred[p])
+                if gain > best_gain:
+                    best_gain = gain
+                    if best_gain == len(uncovered):
+                        break
+            return 1 if best_gain == 0 else ((len(uncovered) + best_gain - 1) // best_gain)
+
+        def _pick_uncovered_with_smallest_branch(uncovered: Set[int]) -> int:
+            best_i, best_deg = None, float('inf')
+            for i in uncovered:
+                deg = len(E_list[i])
+                if deg < best_deg:
+                    best_deg, best_i = deg, i
+            return best_i
+
+        # --- Iterative DFS with explicit stack ---
+        # Each frame: (chosen, covered, uncovered, candidates, next_idx)
+        progress = tqdm(desc=f"... Enumerating hitting sets ({max_size=})", 
+                        unit=" sets", total=max_solutions)
+        stack = [(set(), set(), FULL, None, 0)]
+
+        while stack:
+            chosen, covered, uncovered, candidates, next_idx = stack.pop()
+            
+            # if len(stack) > 1000:
+            #     # print(f"Stack depth: {len(stack)} frames, skipping further checks.")
+            #     continue  # too deep, skip this frame
+
+            # Check if fully covered
+            if not uncovered:
+                fc = frozenset(chosen)
+                old_len = len(solutions)
+                keep: List[frozenset[Constraint]] = []
+                for s in solutions:
+                    if s.issubset(fc):
+                        if s != fc:
+                            break  # new one not minimal
+                    elif fc.issubset(s):
+                        continue  # drop superset
+                    keep.append(s)
+                else:
+                    # commit only if not broken
+                    solutions.clear()
+                    solutions.extend(keep)
+                    solutions.append(fc)
+                    new_len = len(solutions)
+                    progress.update(new_len - old_len)
+                    if max_solutions and len(solutions) >= max_solutions:
+                        progress.close()
+                        return [set(s) for s in solutions]
+                continue
+
+            # Bound by size
+            if max_size is not None and len(chosen) >= max_size:
+                continue
+
+            # Bound by optimistic LB
+            if max_size is not None:
+                lb = _optimistic_lb(uncovered)
+                if len(chosen) + lb > max_size:
+                    continue
+
+            # If no candidates loaded, compute them
+            if candidates is None:
+                pivot = _pick_uncovered_with_smallest_branch(uncovered)
+                
+                predicates = sorted(
+                    E_list[pivot],
+                    key=lambda p: -len((idx_by_pred[p]) & uncovered)
+                )
+                
+                # predicates = sorted(
+                #     E_list[pivot],
+                #     key=lambda p: (
+                #         -_predicate_type_priority(p),            # prioritize by type
+                #         # -len((idx_by_pred[p]) & uncovered)      # then by coverage gain
+                #     )
+                # )
+                
+                candidates, next_idx = predicates, 0
+
+            # If we exhausted candidates, skip
+            if next_idx >= len(candidates):
+                continue
+
+            # Push frame back with incremented index (simulate recursion return)
+            stack.append((chosen, covered, uncovered, candidates, next_idx + 1))
+
+            # Take candidate p
+            p = candidates[next_idx]
+            if p in chosen:
+                new_chosen, new_covered = chosen, covered
+            else:
+                new_chosen = set(chosen)
+                new_chosen.add(p)
+                new_covered = covered | idx_by_pred[p]
+
+            if _dominated_by_existing(new_chosen):
+                continue
+
+            new_uncovered = uncovered - idx_by_pred[p]
+
+            # Push recursive call frame
+            stack.append((new_chosen, new_covered, new_uncovered, None, 0))
+
+        progress.close()
+        return [set(s) for s in solutions]
+
 
     def learn_levelwise_coverage(
         self,
@@ -788,7 +971,6 @@ class LogicLearner(object):
                 varval = self.examples[varname].iloc[0].item()
                 prior_rules.add(f"Eq({varname}, {varval})")
                 
-        
         '''Augment the variables with constants.'''
         avars = set()
         for varname, consts in self.constants.items():
