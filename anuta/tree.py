@@ -121,6 +121,13 @@ class EntropyTreeLearner(TreeLearner):
         super().__init__(constructor, limit)
         h2o.init(max_mem_size=FLAGS.config.JVM_MEM, nthreads=-1)  # -1 = use all available cores
         h2o.no_progress()  # Disables all progress bar output
+        
+        # if self.dataset == 'mawi':
+        #     #* Drop port and ip variables, as they are not useful for MAWI dataset.
+        #     for col in self.examples.columns:
+        #         col = col.lower()
+        #         if 'port' in col or 'ipsrc' in col or 'ipdst' in col:
+        #             self.examples.drop(columns=col, inplace=True)
             
         self.examples: h2o.H2OFrame = h2o.H2OFrame(constructor.df)
         if self.categoricals:
@@ -318,10 +325,10 @@ class EntropyTreeLearner(TreeLearner):
             elif varname in self.categoricals:
                 assumptions.add(f"{varname} >= 0")
                 assumptions.add(f"{varname} <= {max(domain)}")
-                
-                if any(keyword in varname.lower() for keyword in ['pt', 'port']):
+                if any(keyword in varname.lower() for keyword in ['ip', 'pt', 'port']):
                     #* Don't add negative assumptions for port variables.
                     continue
+                
                 full_domain = set(val for val in range(max(domain) + 1))
                 missing_values = full_domain - set(domain)
                 ne_predicates = []

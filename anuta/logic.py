@@ -660,10 +660,14 @@ class LogicLearner(object):
 
             stack = [(set(), set(), FULL, None, 0)]
 
-            last_solution_time = time()
+            start_time = perf_counter()
+            last_solution_time = perf_counter()
             while stack:
+                if perf_counter() - start_time > cfg.TIMEOUT_SEC:
+                    log.warning(f"Learning timed out after {cfg.TIMEOUT_SEC//60}min.")
+                    break
+                
                 chosen, covered, uncovered, candidates, next_idx = stack.pop()
-
                 #& Fully covered
                 if not uncovered:
                     fc = frozenset(chosen)
@@ -683,7 +687,7 @@ class LogicLearner(object):
                             global_solutions.append(fc)
 
                             solutions_this_run.append(fc)
-                            last_solution_time = time()
+                            last_solution_time = perf_counter()
                             progress.update(1)
                             if max_solutions and len(solutions_this_run) >= max_solutions:
                                 # progress.close()
@@ -691,7 +695,7 @@ class LogicLearner(object):
                     continue
                 
                 #& Timeout: if no new solution in the last Xs, stop
-                if time() - last_solution_time > cfg.STALL_TIMEOUT_SEC:
+                if perf_counter() - last_solution_time > cfg.STALL_TIMEOUT_SEC:
                     log.warning(
                         f"Search with {suppressed=} timed out after {cfg.STALL_TIMEOUT_SEC//60}min of no new solutions.")
                     break
@@ -968,8 +972,7 @@ class LogicLearner(object):
         ]
 
         k = 1
-        start = time()
-        TIMEOUT_SEC = 24 * 60 * 60  # 24 hours
+        start = perf_counter()
         timeout_reached = False
         while current_level and k < max_size:
             log.info(f"Level {k}: {len(current_level)} candidates.")
@@ -987,8 +990,8 @@ class LogicLearner(object):
                 if timeout_reached:
                     break
                 for j in range(i + 1, len(current_level)):
-                    if time() - start > TIMEOUT_SEC:
-                        log.warning(f"Timeout reached after {TIMEOUT_SEC//60} minutes.")
+                    if perf_counter() - start > cfg.TIMEOUT_SEC:
+                        log.warning(f"Timeout reached after {cfg.TIMEOUT_SEC//60} minutes.")
                         timeout_reached = True
                         break
                     
