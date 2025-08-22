@@ -50,9 +50,11 @@ def main(constructor: Constructor, refconstructor: Constructor, limit: int):
     else:
         learner = LogicLearner(constructor, limit=limit)
         log.info("Learning constraints using logic programming...")
-        learner.learn_denial()
+        if FLAGS.logic == 'denial':
+            learner.learn_denial()
+        elif FLAGS.logic == 'level':
+            learner.learn_levelwise()
         # learner.learn_levelwise_coverage()
-        # learner.learn_levelwise()
         
         # miner_versionspace(constructor, refconstructor, limit)
 
