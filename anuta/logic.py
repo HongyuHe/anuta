@@ -2,7 +2,7 @@ from collections import defaultdict
 from itertools import combinations
 from pathlib import Path
 from multiprocess import Pool
-from time import perf_counter
+from time import perf_counter, time
 from typing import *
 from joblib import Parallel, delayed
 import numpy as np
@@ -656,10 +656,11 @@ class LogicLearner(object):
 
             stack = [(set(), set(), FULL, None, 0)]
 
+            last_solution_time = time()
             while stack:
                 chosen, covered, uncovered, candidates, next_idx = stack.pop()
 
-                # Fully covered
+                #& Fully covered
                 if not uncovered:
                     fc = frozenset(chosen)
                     if not _dominated_by_existing(fc):
@@ -678,24 +679,30 @@ class LogicLearner(object):
                             global_solutions.append(fc)
 
                             solutions_this_run.append(fc)
+                            last_solution_time = time()
                             progress.update(1)
                             if max_solutions and len(solutions_this_run) >= max_solutions:
                                 # progress.close()
                                 return
-
                     continue
-
-                # Bound by size
+                
+                #& Timeout: if no new solution in the last Xs, stop
+                if time() - last_solution_time > cfg.STALL_TIMEOUT_SEC:
+                    log.warning(
+                        f"Search with {suppressed=} timed out after {cfg.STALL_TIMEOUT_SEC//60}min of no new solutions.")
+                    break
+                
+                #& Bound by size
                 if max_size is not None and len(chosen) >= max_size:
                     continue
 
-                # BnB optimistic bound
+                #& BnB optimistic bound
                 if max_size is not None:
                     lb = _optimistic_lb(uncovered)
                     if len(chosen) + lb > max_size:
                         continue
 
-                # Load candidates if first time
+                #& Load candidates if first time
                 if candidates is None:
                     pivot = _pick_uncovered_with_smallest_branch(uncovered)
                     candidates = [p for p in E_list[pivot] if p in allowed_predicates]
@@ -706,7 +713,7 @@ class LogicLearner(object):
                 if next_idx >= len(candidates):
                     continue
 
-                # Push frame back
+                #* Push frame back
                 stack.append((chosen, covered, uncovered, candidates, next_idx + 1))
 
                 p = candidates[next_idx]
@@ -723,7 +730,6 @@ class LogicLearner(object):
                 new_uncovered = uncovered - idx_by_pred[p]
                 stack.append((new_chosen, new_covered, new_uncovered, None, 0))
 
-            # progress.close()
             return
 
         progress = tqdm(desc=f"... Enumerating hitting sets (max_size={max_size})",
