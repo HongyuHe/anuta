@@ -335,7 +335,8 @@ class LogicLearner(object):
             max_solutions=max_learned_rules,
         )
         end = perf_counter()
-        log.info(f"Enumerated {len(covers)} minimal hitting sets in {end - start:.2f} seconds.")
+        print()
+        log.info(f"Enumerated {len(covers)} minimal hitting sets in {(end - start)/60:.2f} minutes.")
         
         learned_rules: Set[sp.Expr] = set()
         num_trivial = 0
@@ -595,12 +596,15 @@ class LogicLearner(object):
         if not evidence_sets:
             return []
 
-        # All suppression type combinations (power set of surpressed_vtypes)
-        vtypes = [vtype for vtype in VariableType if vtype not in [VariableType.UNKNOWN]]
-        suppression_combos = []
-        for r in range(len(vtypes) + 1):
-            for combo in combinations(vtypes, r):
-                suppression_combos.append(set(combo))
+        # # All suppression type combinations (power set of surpressed_vtypes)
+        # vtypes = [vtype for vtype in VariableType if vtype not in [VariableType.UNKNOWN]]
+        # suppression_combos = []
+        # for r in range(len(vtypes) + 1):
+        #     for combo in combinations(vtypes, r):
+        #         suppression_combos.append(set(combo))
+        
+        allowed = [VariableType.IP, VariableType.PORT, VariableType.SEQUENCING, VariableType.FLAG]
+        suppression_combos = [{vtype for vtype in VariableType if vtype not in allowed}]
         log.info(f"Launching searches with {len(suppression_combos)} suppression sets.")
         
         #* Sort the combos from largest to smallest (suppressing more types first)
@@ -931,7 +935,7 @@ class LogicLearner(object):
         return [set(s) for s in solutions]
 
 
-    def learn_levelwise_coverage(
+    def learn_levelwise(
         self,
         max_size: int = 20,
         max_rules: Optional[int] = None,
@@ -964,6 +968,9 @@ class LogicLearner(object):
         ]
 
         k = 1
+        start = time()
+        TIMEOUT_SEC = 24 * 60 * 60  # 24 hours
+        timeout_reached = False
         while current_level and k < max_size:
             log.info(f"Level {k}: {len(current_level)} candidates.")
             # Frontier maintenance
@@ -977,7 +984,14 @@ class LogicLearner(object):
             prev_learned = len(learned_rules)
             # Apriori joins
             for i, a in enumerate(tqdm(current_level, desc=f"Level {k} joins")):
+                if timeout_reached:
+                    break
                 for j in range(i + 1, len(current_level)):
+                    if time() - start > TIMEOUT_SEC:
+                        log.warning(f"Timeout reached after {TIMEOUT_SEC//60} minutes.")
+                        timeout_reached = True
+                        break
+                    
                     b = current_level[j]
 
                     if len(a.preds & b.preds) != (k - 1):
@@ -1007,7 +1021,9 @@ class LogicLearner(object):
                                 return
                     else:
                         next_level.append(CoverageCandidate(new_preds, new_mask))
-
+            if timeout_reached:
+                log.warning(f"Timeout reached, stopping level {k} learning.")
+                break
             current_level = next_level
             log.info(f"Level {k}: Learned {len(learned_rules) - prev_learned} new rules, total {len(learned_rules)}.")
             k += 1
@@ -1018,11 +1034,11 @@ class LogicLearner(object):
             learned_rules.add(constraint.expr)
         Theory.save_constraints(
             learned_constraints,
-            f"coverage_{self.dataset}_{self.num_examples}.pl"
+            f"levelwise_{self.dataset}_{self.num_examples}.pl"
         )
         return learned_constraints
     
-    def learn_levelwise(
+    def learn_levelwise_netnomos(
         self,
         max_epochs: int = FLAGS.config.LEVELWISE_EPOCHS,
         max_rules: Optional[int] = FLAGS.config.MAX_RULES,
@@ -1333,6 +1349,7 @@ class LogicLearner(object):
         '''Add domain constraints to prior rules.'''
         self.examples = self.examples[self.variables]
         #* First drop identifiers
+        #*  (if they have associated conts, e.g., Pts in CIDDS, they've been generated above).
         identifiers = vtype2vars[VariableType.IP]+vtype2vars[VariableType.PORT]
         for var in identifiers:
             if var in self.variables:

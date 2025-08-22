@@ -20,6 +20,7 @@ flags.DEFINE_boolean("learn", False, "Learn constraints from a dataset")
 flags.DEFINE_boolean("validate", False, "Validate a dataset using a learned theory")
 
 #* Configs
+flags.DEFINE_enum("logic", 'denial', ['denial', 'level'], "Logic learning method to use")
 flags.DEFINE_enum("tree", None, ['dt', 'xgb', 'lgbm'], "Tree learner to use for learning constraints")
 flags.DEFINE_enum("assoc", None, ['apriori', 'fpgrowth', 'hmine'], "Association rule learning algorithm to use")
 flags.DEFINE_string("limit", None, "Limit on the number of examples to learn from")
