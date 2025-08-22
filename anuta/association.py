@@ -390,8 +390,8 @@ class AssociationRuleLearner:
             #* Encode antecedents
             predicates = set()
             for predicate in antecedent:
-                varname = predicate.split('_')[0]
-                value = predicate.split('_')[-1]
+                varname = predicate.split(self.sep)[0]
+                value = predicate.split(self.sep)[-1]
                 if '@' in varname:
                     #* Abstract variable like `@Eq(SrcPt,DstPt)@`
                     assert value.isdigit(), f"Invalid value for abstract variable {varname}: {value}"
@@ -405,8 +405,8 @@ class AssociationRuleLearner:
             
             #* Encode consequents and populate mapping
             for predicate in consequent:
-                varname = predicate.split('_')[0]
-                value = predicate.split('_')[-1]
+                varname = predicate.split(self.sep)[0]
+                value = predicate.split(self.sep)[-1]
                 if '@' in varname:
                     assert value.isdigit(), f"Invalid value for abstract variable {varname=} {value=}"
                     conseq_predicate = varname.replace('@', '') 

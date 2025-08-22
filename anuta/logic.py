@@ -596,15 +596,15 @@ class LogicLearner(object):
         if not evidence_sets:
             return []
 
-        # # All suppression type combinations (power set of surpressed_vtypes)
-        # vtypes = [vtype for vtype in VariableType if vtype not in [VariableType.UNKNOWN]]
-        # suppression_combos = []
-        # for r in range(len(vtypes) + 1):
-        #     for combo in combinations(vtypes, r):
-        #         suppression_combos.append(set(combo))
+        # All suppression type combinations (power set of surpressed_vtypes)
+        vtypes = [vtype for vtype in VariableType if vtype not in [VariableType.UNKNOWN]]
+        suppression_combos = []
+        for r in range(len(vtypes) + 1):
+            for combo in combinations(vtypes, r):
+                suppression_combos.append(set(combo))
         
-        allowed = [VariableType.IP, VariableType.PORT, VariableType.SEQUENCING, VariableType.FLAG]
-        suppression_combos = [{vtype for vtype in VariableType if vtype not in allowed}]
+        # allowed = [VariableType.IP, VariableType.PORT, VariableType.SEQUENCING, VariableType.FLAG]
+        # suppression_combos = [{vtype for vtype in VariableType if vtype not in allowed}]
         log.info(f"Launching searches with {len(suppression_combos)} suppression sets.")
         
         #* Sort the combos from largest to smallest (suppressing more types first)
