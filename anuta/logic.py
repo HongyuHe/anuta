@@ -330,6 +330,7 @@ class LogicLearner(object):
         #     max_solutions=max_learned_rules,
         # )
         covers = self.enumerate_minimal_hitting_sets_suppression(
+            # predicates,
             evidence_sets=evidence_sets,
             max_size=max_predicates,
             max_solutions=max_learned_rules,
@@ -583,6 +584,7 @@ class LogicLearner(object):
 
     def enumerate_minimal_hitting_sets_suppression(
         self,
+        # predicates,
         evidence_sets: List[frozenset[Constraint]],
         max_size: Optional[int] = None,
         max_solutions: Optional[int] = None,
@@ -615,6 +617,16 @@ class LogicLearner(object):
         for i, E in enumerate(tqdm(evidence_sets, desc="... Indexing predicates in evidence sets")):
             for p in E:
                 idx_by_pred[p].add(i)
+        
+        # indexed_preds = list(idx_by_pred.keys())
+        # missing_preds = set()
+        # for predicate in predicates:        
+        #     if predicate not in indexed_preds:
+        #         missing_preds.add(predicate)
+        # print(f"Predicates not in any evidence set: {len(missing_preds)} / {len(predicates)}")
+        # pprint(missing_preds)
+        # exit(0)
+        
         E_list: List[List[Constraint]] = [list(E) for E in evidence_sets]
         FULL = set(range(len(E_list)))
 
@@ -1371,7 +1383,7 @@ class LogicLearner(object):
                 #& Add default predicate X>0 if the domain contains 0 (except for ack and seq which already have >1).
                 if bounds.lb <= 0 <= bounds.ub and vtype != VariableType.SEQUENCING:
                     #* Add X>0 as a default if the domain contains 0.
-                    predicate = f"({varname}>0)"
+                    predicate = f"Eq({varname},0)"
                     predicate_values = (self.examples[varname]>0).astype(int)
                     if predicate_values.nunique() > 1:
                         predicates.add(predicate)
@@ -1406,6 +1418,10 @@ class LogicLearner(object):
             if p not in [sp.true, sp.false]:
                 p = Constraint(sp.sympify(p))
                 constraint_predicates.add(p)
+        
+        # #* Save to file
+        # Theory.save_constraints(constraint_predicates, f'predicates_{self.dataset}.pl')
+        # exit(0)
         
         log.info(f"Duplicate predicates found: {len(predicates) - len(constraint_predicates)}")
         

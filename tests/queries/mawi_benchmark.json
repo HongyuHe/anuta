@@ -31,7 +31,7 @@
 
 {
 "queries": [
-"Implies(Eq(TcpLen_2, 0) & Eq(TcpFlags_2, 16) & Eq(TcpAck_1, TcpSeq_2) & Eq(IpSrc_2, IpDst_1) & Eq(IpDst_2, IpSrc_1) & Eq(TcpSrcport_1, TcpDstport_2) & Eq(TcpSrcport_2, TcpDstport_1), Eq(TcpSeq_2, TcpAck_1))"
+"Implies(Eq(TcpLen_2, 0) & Eq(TcpFlags_2, 16) & Eq(IpSrc_2, IpDst_1) & Eq(IpDst_2, IpSrc_1) & Eq(TcpSrcport_1, TcpDstport_2) & Eq(TcpSrcport_2, TcpDstport_1), Eq(TcpSeq_2, TcpAck_1))"
 ],
 "description": "Pure ACK with no payload correctly acknowledges the first packet"
 },
@@ -64,20 +64,6 @@
 "Eq(IpLen_3, IpHdrLen_3 + TcpHdrLen_3 + TcpLen_3)"
 ],
 "description": "IP total length must equal IP header + TCP header + TCP payload length"
-},
-
-{
-"queries": [
-"Implies(Eq(IpSrc_1, IpDst_2) & Eq(IpSrc_2, IpDst_1) & Eq(TcpSrcport_1, TcpDstport_2) & Eq(TcpSrcport_2, TcpDstport_1) & Eq(TcpSeq_2, TcpAck_1) & (TcpLen_1 > 0) & (TcpLen_2 > 0) & (Eq(TcpFlags_1, 1) | Eq(TcpFlags_1, 2) | Eq(TcpFlags_1, 17) | Eq(TcpFlags_1, 18)), Eq(TcpAck_2, TcpSeq_1 + 1) & Eq(TcpLen_1, 0))"
-],
-"description": "Phantom TCP byte is acknowledged when SYN or FIN is present (packet 1 & 2)"
-},
-
-{
-"queries": [
-"Implies(Eq(IpSrc_2, IpDst_3) & Eq(IpSrc_3, IpDst_2) & Eq(TcpSrcport_2, TcpDstport_3) & Eq(TcpSrcport_3, TcpDstport_2) & Eq(TcpSeq_3, TcpAck_2) & (TcpLen_2 > 0) & (TcpLen_3 > 0) & (Eq(TcpFlags_2, 1) | Eq(TcpFlags_2, 2) | Eq(TcpFlags_2, 17) | Eq(TcpFlags_2, 18)), Eq(TcpAck_3, TcpSeq_2 + 1) & Eq(TcpLen_2, 0))"
-],
-"description": "Phantom TCP byte is acknowledged when SYN or FIN is present (packet 2 & 3)"
 },
 
 {

@@ -10,6 +10,7 @@ import pickle
 from pathlib import Path
 import z3
 from IPython.display import display
+from hashlib import md5
 
 from anuta.utils import *
 from anuta.known import *
@@ -34,15 +35,17 @@ class Constraint(object):
         # self.rank: int = None
         # self.maxrank: int = None
         #* Use the syntactic theory to identify the constraint.
-        self.canonical = sp.srepr(clausify(expr))
-        self.id = hash(self.canonical)
+        #! Python adds process-dependent salt to native `hash()`!!
+        self.canonical: str = sp.srepr(clausify(expr))
+        self.id = int(md5(self.canonical.encode('utf-8')).hexdigest(), 16)
         
     def __hash__(self) -> int:
         #* Define the identity of the constraint for easy set operations.
         return self.id
     
     def __eq__(self, another: 'Constraint') -> bool:
-        assert isinstance(another, Constraint), "Can only compare with another 'Constraint'."
+        assert isinstance(another, Constraint),\
+            f"Can only compare with another 'Constraint', got {type(another)}"
         return self.canonical == another.canonical
     
     def __repr__(self) -> str:
