@@ -616,6 +616,7 @@ class Netflix(Constructor):
         self.df = self.df.astype(int)
         
         self.df = generate_sliding_windows(self.df, stride=STRIDE, window=WINDOW)
+        # self.df = self.df[[bool(n) for n in ctgan_discriminator_labels]]
         
         variables = list(self.df.columns)
         # self.categoricals = []

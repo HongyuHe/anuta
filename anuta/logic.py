@@ -1394,7 +1394,7 @@ class LogicLearner(object):
                 if bounds.lb <= 0 <= bounds.ub and vtype != VariableType.SEQUENCING:
                     #* Add X>0 as a default if the domain contains 0.
                     predicate = f"Eq({varname},0)"
-                    predicate_values = (self.examples[varname]>0).astype(int)
+                    predicate_values = (self.examples[varname]==0).astype(int)
                     if predicate_values.nunique() > 1:
                         predicates.add(predicate)
                     else:

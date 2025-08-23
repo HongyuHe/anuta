@@ -125,9 +125,12 @@ class EntropyTreeLearner(TreeLearner):
         # if self.dataset == 'mawi':
         #     #* Drop port and ip variables, as they are not useful for MAWI dataset.
         #     for col in self.examples.columns:
-        #         col = col.lower()
-        #         if 'port' in col or 'ipsrc' in col or 'ipdst' in col:
+        #         name = col.lower()
+        #         if 'port' in name or 'ipsrc' in name or 'ipdst' in name:
+        #             print(f"Dropping column {col} for MAWI dataset.")
         #             self.examples.drop(columns=col, inplace=True)
+        #             self.variables.remove(col)
+        #             self.categoricals.remove(col)
             
         self.examples: h2o.H2OFrame = h2o.H2OFrame(constructor.df)
         if self.categoricals:
@@ -341,8 +344,22 @@ class EntropyTreeLearner(TreeLearner):
         #         assumptions.add(f"{varname} <= {domain[1]}")
         
         rules = self.learned_rules | assumptions
-        sprules = [sp.sympify(rule) for rule in rules]
-        sprules = list(filter(lambda r: r not in (true, false), sprules))
+        sprules = []
+        # #* Save the strings to a file
+        # with open(f'dt_{self.dataset}_{self.num_examples}_e{epoch}_raw.txt', 'w') as f:
+        #     for rule in self.learned_rules:
+        #         f.write(f"{rule}\n")
+        
+        for rule in tqdm(rules, desc="... Converting learned rules to sympy"):   
+            if rule in (true, false):
+                continue
+            try:
+                sprules.append(sp.sympify(rule))
+            except Exception as e:
+                log.error(f"Failed to sympify rule: {rule}. Skipping.")
+                continue
+        # sprules = [sp.sympify(rule) for rule in rules]
+        # sprules = list(filter(lambda r: r not in (true, false), sprules))
         log.info(f"Total rules saved: {len(sprules)}")
         Theory.save_constraints(sprules, f'dt_{self.dataset}_{self.num_examples}_e{epoch}.pl')
         h2o.shutdown(prompt=False)

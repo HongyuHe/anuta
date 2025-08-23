@@ -24,7 +24,8 @@ def negative_cases() -> List[Dict[str, str]]:
 
 @pytest.fixture
 def theory() -> Theory:
-    modelpath = 'denial_mawi_all_p8.pl'
+    modelpath = 'dt_mawi_all_e1.pl'
+    # modelpath = 'denial_mawi_all_p8.pl'
     return Theory(modelpath)
 
 def test_mawi(

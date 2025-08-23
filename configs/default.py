@@ -6,7 +6,7 @@ def get_config():
     
     default_config.TIMEOUT_SEC = 24 * 60 * 60  # 24 hours
     #* Maximum number of predicates in a rule
-    default_config.MAX_PREDICATES = 12 
+    default_config.MAX_PREDICATES = 8
     #* Maximum number of rules to learn
     default_config.MAX_RULES = 50 
     #* Stop if no improvement in this many seconds
