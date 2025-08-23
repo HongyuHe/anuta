@@ -202,20 +202,20 @@ class AssociationRuleLearner:
         log.info(f"Rule extraction took {end - start:.2f} seconds.")
         
         assumptions = set()
-        for varname, domain in self.domains.items():
-            if domain.kind == DomainType.CATEGORICAL and '@' not in varname:
-                assumptions.add(f"{varname} >= 0")
-                assumptions.add(f"{varname} <= {max(domain.values)}")
+        # for varname, domain in self.domains.items():
+        #     if domain.kind == DomainType.CATEGORICAL and '@' not in varname:
+        #         assumptions.add(f"{varname} >= 0")
+        #         assumptions.add(f"{varname} <= {max(domain.values)}")
                 
-                full_domain = set(val for val in range(max(domain.values) + 1))
-                missing_values = full_domain - set(domain.values)
-                ne_predicates = []
-                for value in missing_values:
-                    ne_predicates.append(f"Ne({varname},{value})")
-                #* Don't add negative assumptions for port variables.
-                keywords = ['pt', 'port']
-                if ne_predicates and not any(keyword in varname.lower() for keyword in keywords):
-                    assumptions.add(' & '.join(ne_predicates))
+        #         full_domain = set(val for val in range(max(domain.values) + 1))
+        #         missing_values = full_domain - set(domain.values)
+        #         ne_predicates = []
+        #         for value in missing_values:
+        #             ne_predicates.append(f"Ne({varname},{value})")
+        #         #* Don't add negative assumptions for port variables.
+        #         keywords = ['pt', 'port']
+        #         if ne_predicates and not any(keyword in varname.lower() for keyword in keywords):
+        #             assumptions.add(' & '.join(ne_predicates))
         # assumptions = set(assumptions) | set(get_missing_domain_rules(self.df, self.domains))
         
         rules = set(self.learned_rules) | assumptions

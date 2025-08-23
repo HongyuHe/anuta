@@ -8,7 +8,7 @@ def get_config():
     #* Maximum number of predicates in a rule
     default_config.MAX_PREDICATES = 12 
     #* Maximum number of rules to learn
-    default_config.MAX_RULES = 1_000 
+    default_config.MAX_RULES = 50 
     #* Stop if no improvement in this many seconds
     default_config.STALL_TIMEOUT_SEC = 5 * 60  
     default_config.LEVELWISE_EPOCHS = 10  #* Number of epochs for levelwise learning

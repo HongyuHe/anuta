@@ -659,6 +659,15 @@ class LogicLearner(object):
                 if deg < best_deg:
                     best_deg, best_i = deg, i
             return best_i
+        
+        def _pick_uncovered_with_smallest_unchosen(uncovered: Set[int], chosen: Set[Constraint]) -> int:
+            best_i, best_deg = None, float('inf')
+            for i in uncovered:
+                deg = len(evidence_sets[i] - frozenset(chosen))
+                if deg < best_deg:
+                    best_deg, best_i = deg, i
+            return best_i
+        
 
         # Run one search with a suppression set
         def run_search(suppressed: Set[VariableType]):
@@ -724,7 +733,8 @@ class LogicLearner(object):
 
                 #& Load candidates if first time
                 if candidates is None:
-                    pivot = _pick_uncovered_with_smallest_branch(uncovered)
+                    # pivot = _pick_uncovered_with_smallest_branch(uncovered)
+                    pivot = _pick_uncovered_with_smallest_unchosen(uncovered, chosen)
                     candidates = [p for p in E_list[pivot] if p in allowed_predicates]
                     # sort by coverage gain
                     candidates = sorted(candidates, key=lambda p: -len((idx_by_pred[p]) & uncovered))
