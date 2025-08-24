@@ -1391,8 +1391,11 @@ class LogicLearner(object):
                 prior_rules.add(f"({varname}<={bounds.ub})")
                 
                 #& Add default predicate X>0 if the domain contains 0 (except for ack and seq which already have >1).
-                if bounds.lb <= 0 <= bounds.ub and vtype != VariableType.SEQUENCING:
-                    #* Add X>0 as a default if the domain contains 0.
+                if (bounds.lb <= 0 <= bounds.ub 
+                    and bounds.lb != bounds.ub 
+                    and vtype != VariableType.SEQUENCING
+                ):
+                    #* Add X=0 as a default if the domain contains 0.
                     predicate = f"Eq({varname},0)"
                     predicate_values = (self.examples[varname]==0).astype(int)
                     if predicate_values.nunique() > 1:

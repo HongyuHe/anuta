@@ -277,6 +277,25 @@ class Theory(object):
         if verbose: pprint(result)
         return result
         
+    @staticmethod
+    def get_unsat_core(constraints: List[sp.Expr]) -> List[str]:
+        s = z3.Solver()
+        s.set(unsat_core=True)
+        
+        evalmap = z3evalmap
+        z3rules = [
+            eval(str(sp.sympify(rule)), evalmap) 
+            for rule in constraints
+        ]
+        
+        for rule in z3rules:
+            s.assert_and_track(rule, str(rule))
+        
+        if s.check() != z3.unsat:
+            log.info("Theory is consistent (sat). No unsat core.")
+            return []
+        unsat_core = s.unsat_core()
+        return unsat_core
         
     @staticmethod
     def z3create(constraints: List[sp.Expr]):
