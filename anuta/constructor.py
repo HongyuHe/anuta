@@ -639,17 +639,17 @@ class Netflix(Constructor):
                 )
                 
         prior_rules = []
-        # variables, self.categoricals, self.df = self.build_abstract_domain(
-        #     variables, self.constants, self.categoricals, self.df)
-        # self.df.to_csv('netflix_abstracted.csv', index=False)
-        # variables, self.categoricals, prior_rules, self.df = self.build_abstract_domain(
-        #     variables, self.constants, self.df)
+        variables, self.categoricals, self.df = self.build_abstract_domain(
+            variables, self.constants, self.categoricals, self.df)
+        self.df.to_csv('netflix_abstracted.csv', index=False)
+        variables, self.categoricals, prior_rules, self.df = self.build_abstract_domain(
+            variables, self.constants, self.df)
         # #! Only consider the categorical variables for now.
         # self.df = self.df[self.categoricals]
         # variables = self.categoricals
         
-        _, grouped_vars = group_variables_by_type_and_domain(variables)
-        self.categoricals = grouped_vars[DomainType.CATEGORICAL]
+        # _, grouped_vars = group_variables_by_type_and_domain(variables)
+        # self.categoricals = grouped_vars[DomainType.CATEGORICAL]
         
         domains = {}
         for name in self.df.columns:

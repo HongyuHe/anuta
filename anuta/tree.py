@@ -319,29 +319,29 @@ class EntropyTreeLearner(TreeLearner):
         print(f"\t{unclassified_counts=}")
         
         assumptions = set()
-        # for varname, domain in self.domains.items():
-        #     if '@' in varname:
-        #         #* Abstract variable/predicate, assume it is binary
-        #         # varname = varname.replace('@', '')
-        #         # assumptions.add(f"Eq({varname}, true) | Eq({varname}, false)")
-        #         pass
-        #     elif varname in self.categoricals:
-        #         assumptions.add(f"{varname} >= 0")
-        #         assumptions.add(f"{varname} <= {max(domain)}")
-        #         if any(keyword in varname.lower() for keyword in ['ip', 'pt', 'port']):
-        #             #* Don't add negative assumptions for port variables.
-        #             continue
+        for varname, domain in self.domains.items():
+            if '@' in varname:
+                #* Abstract variable/predicate, assume it is binary
+                # varname = varname.replace('@', '')
+                # assumptions.add(f"Eq({varname}, true) | Eq({varname}, false)")
+                pass
+            elif varname in self.categoricals:
+                assumptions.add(f"{varname} >= 0")
+                assumptions.add(f"{varname} <= {max(domain)}")
+                if any(keyword in varname.lower() for keyword in ['ip', 'pt', 'port']):
+                    #* Don't add negative assumptions for port variables.
+                    continue
                 
-        #         full_domain = set(val for val in range(max(domain) + 1))
-        #         missing_values = full_domain - set(domain)
-        #         ne_predicates = []
-        #         for value in missing_values:
-        #             ne_predicates.append(f"Ne({varname},{value})")
-        #         if ne_predicates:
-        #             assumptions.add(' & '.join(ne_predicates))
-        #     else:
-        #         assumptions.add(f"{varname} >= {domain[0]}")
-        #         assumptions.add(f"{varname} <= {domain[1]}")
+                full_domain = set(val for val in range(max(domain) + 1))
+                missing_values = full_domain - set(domain)
+                ne_predicates = []
+                for value in missing_values:
+                    ne_predicates.append(f"Ne({varname},{value})")
+                if ne_predicates:
+                    assumptions.add(' & '.join(ne_predicates))
+            else:
+                assumptions.add(f"{varname} >= {domain[0]}")
+                assumptions.add(f"{varname} <= {domain[1]}")
         
         rules = self.learned_rules | assumptions
         sprules = []
