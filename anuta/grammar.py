@@ -70,6 +70,7 @@ class VariableType(Enum):
     PROTO = auto()
     TTL = auto()
     AGGREGATE = auto()
+    MEASUREMENT = auto()
     UNKNOWN = auto()
 
 
@@ -87,6 +88,7 @@ TYPE_DOMIAN = {
     VariableType.TIME: DomainType.NUMERICAL,
     VariableType.TTL: DomainType.NUMERICAL,
     VariableType.AGGREGATE: DomainType.NUMERICAL,
+    VariableType.MEASUREMENT: DomainType.NUMERICAL,
     VariableType.UNKNOWN: "unknown"
 }
 
@@ -99,7 +101,10 @@ def get_variable_type(name: str) -> VariableType:
     elif 'ttl' in lname:
         return VariableType.TTL
     elif 'agg' in lname:
+        #* Separate aggregate measurements from raw measurements.
         return VariableType.AGGREGATE
+    elif any(k in lname for k in ('ingress', 'egress')):
+        return VariableType.MEASUREMENT
     elif any(k in lname for k in ('pt', 'port')):
         return VariableType.PORT
     elif any(k in lname for k in ('tcpseq', 'tcpack')):
@@ -136,6 +141,14 @@ def group_variables_by_type_and_domain(var_list: List[str]) -> Tuple[
     for vtype, vars in typed.items():
         kind = TYPE_DOMIAN[vtype]
         grouped[kind].extend(vars)
+    
+    #* Fill in missing domain and variable types with empty lists.
+    for dtype in DomainType:
+        if dtype not in grouped:
+            grouped[dtype] = []
+    for vtype in VariableType:
+        if vtype not in typed:
+            typed[vtype] = []
     
     return typed, dict(grouped)
 

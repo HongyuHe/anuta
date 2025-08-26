@@ -639,8 +639,8 @@ class Netflix(Constructor):
                 )
                 
         prior_rules = []
-        variables, self.categoricals, prior_rules, self.df = self.build_abstract_domain(
-            variables, self.constants, self.df)
+        # variables, self.categoricals, prior_rules, self.df = self.build_abstract_domain(
+        #     variables, self.constants, self.df)
         # #! Only consider the categorical variables for now.
         # self.df = self.df[self.categoricals]
         # variables = self.categoricals
@@ -841,13 +841,19 @@ class Millisampler(Constructor):
         self.feature_marker = 'Agg'
         
         self.constants: dict[str, Constants] = {}
+        for var in variables:
+            if 'Agg' in var:
+                self.constants[var] = Constants(
+                    kind=ConstantType.LIMIT,
+                    values=[0] #* Compare these variables to zero (>0)
+                )
         self.constants['IngressBytesAgg'] = Constants(
             kind=ConstantType.LIMIT,
-            values=[8, 38983679]
+            values=[0, 8, 38983679]
         )
         self.constants['ConnectionsAgg'] = Constants(
             kind=ConstantType.LIMIT,
-            values=[26700]
+            values=[0, 26700]
         )
         
         domains = {}
@@ -856,7 +862,7 @@ class Millisampler(Constructor):
                                    Bounds(self.df[name].min().item(), 
                                           self.df[name].max().item()), 
                                    None)
-        self.anuta = Anuta(variables, domains, constants={})
+        self.anuta = Anuta(variables, domains, constants=self.constants)
         return
 
 # class Millisampler(Constructor):

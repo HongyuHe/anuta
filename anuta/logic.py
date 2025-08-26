@@ -1212,8 +1212,11 @@ class LogicLearner(object):
         log.info(f"Created {len(avars)} augmented variables.")
         
         '''Compound variables'''
-        #& All pairs of X+Y and (some) X*Y
+        #& X+Y and (some) X*Y of the same type.
         for vtype in vtype2vars:
+            if vtype == VariableType.MEASUREMENT:
+                #* Skip fine-grained ingress for now (too many combinations).
+                continue
             domaintype = TYPE_DOMIAN[vtype]
             if domaintype != DomainType.NUMERICAL: 
                 #* Only augment numerical vars.
@@ -1270,7 +1273,9 @@ class LogicLearner(object):
                     #& X > c and X ≤ c
                     for constant in self.constants[lhs].values:
                         predicates.add(f"({lhs} > {constant})")
-                        predicates.add(f"({lhs} <= {constant})")
+                        if constant != 0:
+                            #! Assume no negative values.
+                            predicates.add(f"({lhs} <= {constant})")
                         #? Since we don't care equality (X=c), we omit the following:
                         # predicates.add(f"({lhs} <= {constant})")
                         # predicates.add(f"({lhs} > {constant})")
@@ -1322,32 +1327,33 @@ class LogicLearner(object):
                     continue
                 
                 '''Create predicates for the LHS and RHS.'''
-                #& Equality predicates: Eq(A,B)
-                predicate = f"Eq({lhs},{rhs})"
-                predicate_values = (self.examples[lhs]==self.examples[rhs]).astype(int)
-                #* Check uniqueness -> add as priors
-                if predicate_values.nunique() > 1:
+                if vtype_rhs != VariableType.MEASUREMENT:
+                    #& Equality predicates: Eq(A,B)
+                    predicate = f"Eq({lhs},{rhs})"
+                    predicate_values = (self.examples[lhs]==self.examples[rhs]).astype(int)
+                    #* Check uniqueness -> add as priors
+                    if predicate_values.nunique() > 1:
+                        self.examples[predicate] = predicate_values
+                        predicates.add(predicate)
+                    else:
+                        #* Invert the predicate if it's always false.
+                        if predicate_values.iloc[0] == 0:
+                            predicate = f"Ne({lhs},{rhs})"
+                        prior_rules.add(predicate)
+                        #* Skip the rest of the predicates with this LHS.
+                        continue
+                        
+                    #& Inequality predicates: Ne(A,B)
+                    predicate = f"Ne({lhs},{rhs})"
+                    predicate_values = (self.examples[lhs]!=self.examples[rhs]).astype(int)
+                    #* Should have >1 unique value to this point.
+                    assert predicate_values.nunique() > 1
                     self.examples[predicate] = predicate_values
                     predicates.add(predicate)
-                else:
-                    #* Invert the predicate if it's always false.
-                    if predicate_values.iloc[0] == 0:
-                        predicate = f"Ne({lhs},{rhs})"
-                    prior_rules.add(predicate)
-                    #* Skip the rest of the predicates with this LHS.
-                    continue
-                    
-                #& Inequality predicates: Ne(A,B)
-                predicate = f"Ne({lhs},{rhs})"
-                predicate_values = (self.examples[lhs]!=self.examples[rhs]).astype(int)
-                #* Should have >1 unique value to this point.
-                assert predicate_values.nunique() > 1
-                self.examples[predicate] = predicate_values
-                predicates.add(predicate)
                 
-                if (domaintype_lhs == DomainType.NUMERICAL 
-                    #* Doesn't make sense to compare sequencing variables other than equality.
-                    and vtype_lhs != VariableType.SEQUENCING):
+                #* Doesn't make sense to compare sequencing variables other than equality.
+                if (vtype_lhs != VariableType.SEQUENCING
+                    and domaintype_lhs == DomainType.NUMERICAL ):
                     assert domaintype_rhs == DomainType.NUMERICAL, \
                         "LHS and RHS must have the same domain type."
                     #& Comparison predicates: A>B
