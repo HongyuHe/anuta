@@ -639,9 +639,6 @@ class Netflix(Constructor):
                 )
                 
         prior_rules = []
-        variables, self.categoricals, self.df = self.build_abstract_domain(
-            variables, self.constants, self.categoricals, self.df)
-        self.df.to_csv('netflix_abstracted.csv', index=False)
         variables, self.categoricals, prior_rules, self.df = self.build_abstract_domain(
             variables, self.constants, self.df)
         # #! Only consider the categorical variables for now.
