@@ -843,6 +843,16 @@ class Millisampler(Constructor):
         self.categoricals = []
         self.feature_marker = 'Agg'
         
+        self.constants: dict[str, Constants] = {}
+        self.constants['IngressBytesAgg'] = Constants(
+            kind=ConstantType.LIMIT,
+            values=[8, 38983679]
+        )
+        self.constants['ConnectionsAgg'] = Constants(
+            kind=ConstantType.LIMIT,
+            values=[26700]
+        )
+        
         domains = {}
         for name in self.df.columns:
             domains[name] = Domain(DomainType.NUMERICAL, 

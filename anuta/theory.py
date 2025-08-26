@@ -1,5 +1,6 @@
 from enum import Enum
 import json
+import re
 import sympy as sp
 from sympy.logic.inference import satisfiable
 from typing import *
@@ -447,12 +448,12 @@ class Theory(object):
         return final_result
         
     @staticmethod
-    def interpret(rules: List[sp.Expr], dataset: str='cidds', 
+    def interpret(rules: List[sp.Expr], dataset: str='pcap', 
                   save_path=None) -> sp.Expr:
-        if dataset != 'cidds':
-            raise ValueError(f"Dataset not supported: {dataset}")
+        assert dataset in ['pcap', 'netflow'], f"Unknown dataset {dataset} for interpretation."
+        
         #* CIDDs specific conversions.
-        def interpret_cidds(varname, varval):
+        def _interpret_netflow(varname, varval):
             # varval = int(varval)
             # if any([op in varval for op in ['=', '≠', '∧', '∨', '⇒', '≥', '×']]):
             #     return value
@@ -465,14 +466,73 @@ class Theory(object):
                 value = cidds_flags_conversion.inverse[varval]
             elif 'Proto' in varname:
                 value = cidds_proto_conversion.inverse[varval]
-            elif 'Pt' in varname:
-                value = cidds_port_conversion.inverse[varval]
+            # elif 'Pt' in varname:
+            #     value = cidds_port_conversion.inverse[varval]
             else:
                 value = varval
             return value
+        
+        def _interpret_pcap(varname, varval):
+            if not isinstance(varval, int):
+                return varval
+            
+            if 'TcpFlags' in varname:
+                return get_tcp_flags(varval)
+            else:
+                return varval
+        
+        def _translate_var(var: str, dataset="pcap") -> str:
+            if dataset == "pcap":
+                # Extract suffix (_1, _2, _3)
+                m = re.match(r"([A-Za-z]+[A-Za-z0-9]*?)_(\d+)", var)
+                if m:
+                    base, idx = m.groups()
+                    phrase = pcap_field_translation.get(base, base)
+                    return f"{phrase} of packet {idx}"
+                return pcap_field_translation.get(var, var)
+            elif dataset == "netflow":
+                return netflow_field_translation.get(var, var)
+            else:
+                return var
+            
+        def _translate_to_english(formula: str, dataset="pcap") -> str:
+            # First replace operators
+            replacements = {
+                r'\s*∨\s*': " or ",
+                r'\s*∧\s*': " and ",
+                r'⇒': " implies ",
+                r'=': " equals ",
+                r'≠': " does not equal ",
+                r'≤': " is less than or equal to ",
+                r'≥': " is greater than or equal to ",
+                r'<': " is less than ",
+                r'>': " is greater than ",
+                r'\+': " plus ",
+                r'x': " times ",
+                r'¬': "not ",
+                r'⇔': " if and only if ",
+                r'%': " modulo ",
+            }
+            eng = formula
+            for pat, repl in replacements.items():
+                eng = re.sub(pat, repl, eng)
 
-        def eq_str(a, b): return f"({a} = {interpret_cidds(a, b)})"
-        def ne_str(a, b): return f"({a} ≠ {interpret_cidds(a, b)})"
+            # Now replace variables
+            tokens = re.findall(r"[A-Za-z0-9_]+", eng)
+            for t in sorted(tokens, key=len, reverse=True):
+                if any(c.isalpha() for c in t):  # skip pure numbers
+                    eng = eng.replace(t, _translate_var(t, dataset))
+
+            return eng
+    
+        _interpret = None
+        if dataset == 'netflow':
+            _interpret = _interpret_netflow
+        elif dataset == 'pcap':
+            _interpret = _interpret_pcap
+
+        def eq_str(a, b): return f"({a} = {_interpret(a, b)})"
+        def ne_str(a, b): return f"({a} ≠ {_interpret(a, b)})"
         def and_str(*args):
             s = ''
             for arg in args:
@@ -481,7 +541,7 @@ class Theory(object):
         def or_str(*args):
             s = ''
             for arg in args:
-                s += f"{arg} v "
+                s += f"{arg} ∨ "
             return f"({s[:-3]})"
         def implies_str(a, b): return f"({a}) ⇒ ({b})"
         def sym_str(a): return a
@@ -492,20 +552,37 @@ class Theory(object):
         def lt_str(a, b): return f"({a} ≤ {b})"
         def strict_lt_str(a, b): return f"({a} < {b})"
         def mul_str(a, b): return f"{a}x{b}"
+        def add_str(*args):
+            s = ''
+            for arg in args:
+                s += f"{arg} + "
+            return s[:-3]
+        def not_str(a): return f"¬({a})"
+        def equiv_str(a, b): return f"({a} ⇔ {b})"
+        def mod_str(a, b): return f"({a} % {b})"
 
             
-        cidds_interpretation = {
+        interpretation = {
             'Equality': eq_str, 'Unequality': ne_str, 'And': and_str, 'Or': or_str, 
             'Implies': implies_str, 'Symbol': sym_str, 'Integer': int_str, 'Mul': mul_str, 
-            'GreaterThan': gt_str, 'LessThan': lt_str, 'Float': float_str,
-            'StrictGreaterThan': strict_gt_str, 'StrictLessThan': strict_lt_str,
+            'GreaterThan': gt_str, 'LessThan': lt_str, 'Float': float_str, 'Add': add_str,
+            'StrictGreaterThan': strict_gt_str, 'StrictLessThan': strict_lt_str, 'Not': not_str,
+            'Equivalent': equiv_str, 'Mod': mod_str,
         }
-        interpreted = sorted([eval(sp.srepr(rule), cidds_interpretation) for rule in rules])
+        interpreted = [eval(sp.srepr(rule), interpretation) for rule in rules]
+        translated = [_translate_to_english(rule, dataset) for rule in interpreted]
+        
         if save_path:
             with open(save_path, 'w') as f:
                 for rule in interpreted:
                     f.write(rule + '\n')
+            log.info(f"Interpreted rules saved to {save_path}")
+            with open(f"{save_path}.en", 'w') as f:
+                for rule in translated:
+                    f.write(rule + '\n')
+            log.info(f"Translated rules saved to {save_path}.en")
         return interpreted
+    
     
     @staticmethod
     def save_thoery(theory: sp.Expr, path: str='theories/theory.pkl') -> None:
@@ -548,7 +625,7 @@ class Theory(object):
                 # else:
                 #     print(f"Skipping DNF clause: {expr}")
                 constraints.append(expr)
-                print(f"Loaded # of constraints:\t{i+1}", end='\r')
+                print(f"... Loaded # of constraints:\t{i+1}", end='\r')
         log.info(f"Loaded {len(constraints)} constraints from {path}")
         return constraints
     

@@ -69,6 +69,56 @@ def normalize_pcap_5tuple(row):
         "flow_port_2": port_pair[1],
         "flow_proto": row["ip_proto"]
     })
+    
+def get_tcp_flags(bitmask) -> str:
+    """
+    Convert a numeric TCP flags bitmask to a list of corresponding flag names.
+
+    :param bitmask: Numeric bitmask of TCP flags (integer).
+    :return: List of flag names joined by hyphens.
+    """
+    if isinstance(bitmask, str):
+        bitmask = int(bitmask, base=16)
+    if bitmask < 0: return ""
+    
+    #* Define TCP flags and their corresponding bit positions
+    flags = [
+        (0x01, "FIN"),  # 0b00000001
+        (0x02, "SYN"),  # 0b00000010
+        (0x04, "RST"),  # 0b00000100
+        (0x08, "PSH"),  # 0b00001000
+        (0x10, "ACK"),  # 0b00010000
+        (0x20, "URG"),  # 0b00100000
+        (0x40, "ECE"),  # 0b01000000
+        (0x80, "CWR"),  # 0b10000000
+    ]
+    
+    #* Extract flags from the bitmask
+    result = [name for bit, name in flags if bitmask & bit]
+    return '-'.join(result)
+
+def get_tcp_flag_mask(flag_string: str) -> int:
+    """
+    Convert a hyphen-joined TCP flag string (e.g., 'SYN-ACK') to its numeric bitmask.
+    
+    :param flag_string: String of flag names joined by hyphens.
+    :return: Integer bitmask.
+    """
+    flag_to_bit = {
+        "FIN": 0x01,
+        "SYN": 0x02,
+        "RST": 0x04,
+        "PSH": 0x08,
+        "ACK": 0x10,
+        "URG": 0x20,
+        "ECE": 0x40,
+        "CWR": 0x80
+    }
+    
+    if not flag_string or not isinstance(flag_string, str):
+        return 0
+    
+    return sum(flag_to_bit.get(flag.strip(), 0) for flag in flag_string.upper().split('-'))
 
 
 from multiprocessing import Pool, cpu_count

@@ -69,6 +69,7 @@ class VariableType(Enum):
     TIME = auto()
     PROTO = auto()
     TTL = auto()
+    AGGREGATE = auto()
     UNKNOWN = auto()
 
 
@@ -85,6 +86,7 @@ TYPE_DOMIAN = {
     VariableType.WINDOW: DomainType.NUMERICAL,
     VariableType.TIME: DomainType.NUMERICAL,
     VariableType.TTL: DomainType.NUMERICAL,
+    VariableType.AGGREGATE: DomainType.NUMERICAL,
     VariableType.UNKNOWN: "unknown"
 }
 
@@ -96,6 +98,8 @@ def get_variable_type(name: str) -> VariableType:
         return VariableType.IP
     elif 'ttl' in lname:
         return VariableType.TTL
+    elif 'agg' in lname:
+        return VariableType.AGGREGATE
     elif any(k in lname for k in ('pt', 'port')):
         return VariableType.PORT
     elif any(k in lname for k in ('tcpseq', 'tcpack')):

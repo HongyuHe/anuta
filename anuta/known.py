@@ -128,7 +128,7 @@ popular_ports = [
 #? Should port be a categorical variable? Sometimes we need range values (i.e., application and dynamic ports).
 cidds_categoricals = ['Flags', 'Proto', 'SrcIpAddr', 'DstIpAddr'] + ['SrcPt', 'DstPt']
 cidds_numericals = ['Packets', 'Bytes', 'Duration']
-cidds_ips = ['private_p2p', 'private_broadcast', 'any', 'public_p2p', 'dns']
+cidds_ips = ['private_p2p', 'private_broadcast', '0.0.0.0', 'public_p2p', 'dns']
 cidds_ports = [0, 3, 8, 11, 22, 25, 
             #    23, #* Telnet
             #    8000, #* Seafile Server
@@ -179,7 +179,7 @@ def cidds_ip_map(ip: str):
         new_ip += 'p2p'
     
     if ip == '0.0.0.0':
-        new_ip = 'any'
+        new_ip = '0.0.0.0'
     elif ip == '255.255.255.255':
         new_ip = 'private_broadcast'
     elif ip == 'DNS':
@@ -197,3 +197,41 @@ def cidds_flag_map(flag: str):
     
     return cidds_flags_conversion[new_flag]
 #******************** CIDDS-001 Domain Knowledge ends ********************
+
+pcap_field_translation = {
+    "FrameLen": "the frame length",
+    "IpLen": "the IP packet length",
+    "IpVersion": "the IP version",
+    "IpHdrLen": "the IP header length",
+    "IpTtl": "the IP time-to-live",
+    "IpProto": "the IP protocol",
+    "IpSrc": "the source IP address",
+    "IpDst": "the destination IP address",
+    "TcpSrcport": "the TCP source port",
+    "TcpDstport": "the TCP destination port",
+    "TcpHdrLen": "the TCP header length",
+    "TcpLen": "the TCP segment length",
+    "TcpFlags": "the TCP flags",
+    "TcpSeq": "the TCP sequence number",
+    "TcpAck": "the TCP acknowledgment number",
+    "TcpUrgentPointer": "the TCP urgent pointer",
+    "TcpWindowSizeValue": "the TCP window size value",
+    "TcpWindowSizeScalefactor": "the TCP window size scale factor",
+    "TcpWindowSize": "the TCP window size",
+    "Tsval": "the TCP timestamp value",
+    "Tsecr": "the TCP timestamp echo reply",
+    "Protocol": "the protocol",
+}
+
+netflow_field_translation = {
+    "Date first seen": "the flow start time",
+    "Duration": "the flow duration",
+    "Proto": "the protocol",
+    "SrcIpAddr": "the source IP address",
+    "SrcPt": "the source port",
+    "DstIpAddr": "the destination IP address",
+    "DstPt": "the destination port",
+    "Packets": "the number of packets",
+    "Bytes": "the number of bytes",
+    "Flags": "the TCP flags",
+}
