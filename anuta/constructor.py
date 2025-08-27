@@ -645,8 +645,8 @@ class Netflix(Constructor):
         # self.df = self.df[self.categoricals]
         # variables = self.categoricals
         
-        # _, grouped_vars = group_variables_by_type_and_domain(variables)
-        # self.categoricals = grouped_vars[DomainType.CATEGORICAL]
+        _, grouped_vars = group_variables_by_type_and_domain(variables)
+        self.categoricals = grouped_vars[DomainType.CATEGORICAL]
         
         domains = {}
         for name in self.df.columns:

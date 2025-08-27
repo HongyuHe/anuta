@@ -601,10 +601,13 @@ class LogicLearner(object):
         # All suppression type combinations (power set of surpressed_vtypes)
         vtypes = [vtype for vtype in VariableType if vtype not in [VariableType.UNKNOWN]]
         suppression_combos = []
-        for r in range(len(vtypes) + 1):
-            for combo in combinations(vtypes, r):
-                suppression_combos.append(set(combo))
-        
+        if cfg.ENABLE_TYPE_SUPPRESSION:
+            for r in range(len(vtypes) + 1):
+                for combo in combinations(vtypes, r):
+                    suppression_combos.append(set(combo))
+        else:
+            suppression_combos.append(set(vtypes))
+            
         # allowed = [VariableType.IP, VariableType.PORT, VariableType.SEQUENCING, VariableType.FLAG]
         # suppression_combos = [{vtype for vtype in VariableType if vtype not in allowed}]
         log.info(f"Launching searches with {len(suppression_combos)} suppression sets.")
@@ -1438,7 +1441,7 @@ class LogicLearner(object):
                 p = Constraint(sp.sympify(p))
                 constraint_predicates.add(p)
         
-        # #* Save to file
+        # #* Save predicates to file for inspection.
         # Theory.save_constraints(constraint_predicates, f'predicates_{self.dataset}.pl')
         # exit(0)
         
