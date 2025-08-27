@@ -721,7 +721,7 @@ class LogicLearner(object):
                 #& Timeout: if no new solution in the last Xs, stop
                 if perf_counter() - last_solution_time > cfg.STALL_TIMEOUT_SEC:
                     log.warning(
-                        f"Search with {suppressed=} timed out after {cfg.STALL_TIMEOUT_SEC//60}min of no new solutions.")
+                        f"Search with {len(vtypes)-len(suppressed)} vtypes timed out after {cfg.STALL_TIMEOUT_SEC//60}min of no new solutions.")
                     break
                 
                 #& Bound by size
