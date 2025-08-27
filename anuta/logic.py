@@ -602,11 +602,11 @@ class LogicLearner(object):
         vtypes = [vtype for vtype in VariableType if vtype not in [VariableType.UNKNOWN]]
         suppression_combos = []
         if cfg.ENABLE_TYPE_SUPPRESSION:
-            for r in range(len(vtypes) + 1):
+            for r in range(len(vtypes)):
                 for combo in combinations(vtypes, r):
                     suppression_combos.append(set(combo))
         else:
-            suppression_combos.append(set(vtypes))
+            suppression_combos.append(set())
             
         # allowed = [VariableType.IP, VariableType.PORT, VariableType.SEQUENCING, VariableType.FLAG]
         # suppression_combos = [{vtype for vtype in VariableType if vtype not in allowed}]
