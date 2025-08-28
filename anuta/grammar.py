@@ -71,6 +71,7 @@ class VariableType(Enum):
     TTL = auto()
     AGGREGATE = auto()
     MEASUREMENT = auto()
+    COUNT = auto()
     UNKNOWN = auto()
 
 
@@ -89,6 +90,7 @@ TYPE_DOMIAN = {
     VariableType.TTL: DomainType.NUMERICAL,
     VariableType.AGGREGATE: DomainType.NUMERICAL,
     VariableType.MEASUREMENT: DomainType.NUMERICAL,
+    VariableType.COUNT: DomainType.NUMERICAL,
     VariableType.UNKNOWN: "unknown"
 }
 
@@ -100,6 +102,8 @@ def get_variable_type(name: str) -> VariableType:
         return VariableType.IP
     elif 'ttl' in lname:
         return VariableType.TTL
+    elif 'connections' in lname:
+        return VariableType.COUNT
     elif 'agg' in lname:
         #* Separate aggregate measurements from raw measurements.
         return VariableType.AGGREGATE

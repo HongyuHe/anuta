@@ -1174,6 +1174,7 @@ class LogicLearner(object):
     def generate_predicates_and_prior(self) -> Set[Constraint]:
         vtype2vars, domaintype2vars = group_variables_by_type_and_domain(self.variables)
         variable_types = self.vtypes
+        pprint(vtype2vars)
         
         prior_rules: Set[str] = set()
         #* Collecting categorical variables (with >1 unique value).

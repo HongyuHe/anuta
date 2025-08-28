@@ -892,13 +892,33 @@ class Millisampler(Constructor):
             values=[0, 26700]
         )
         
+        self.multiconstants: List[Tuple[str, Constants]] = []
+        TOP_K = 6
+        for var in variables:
+            if 'Agg' in var:
+                self.multiconstants.append(
+                    (var, Constants(kind=ConstantType.LIMIT, values=[0]))
+                )
+                top_values = self.df[var].value_counts().nlargest(TOP_K).index.tolist()
+                self.multiconstants.append(
+                    (var, Constants(kind=ConstantType.ASSIGNMENT, values=top_values))
+                )
+        self.multiconstants.append(
+            ('IngressBytesAgg', Constants(kind=ConstantType.LIMIT, values=[0, 8, 38983679]))
+        )
+        self.multiconstants.append(
+            ('ConnectionsAgg', Constants(kind=ConstantType.LIMIT, values=[0, 26700]))
+        )
+        
+        # pprint(self.multiconstants)
+        
         domains = {}
         for name in self.df.columns:
             domains[name] = Domain(DomainType.NUMERICAL, 
                                    Bounds(self.df[name].min().item(), 
                                           self.df[name].max().item()), 
                                    None)
-        self.anuta = Anuta(variables, domains, constants=self.constants)
+        self.anuta = Anuta(variables, domains, constants=self.constants, multiconstants=self.multiconstants)
         return
 
 # class Millisampler(Constructor):
