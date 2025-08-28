@@ -381,6 +381,7 @@ class LogicLearner(object):
 
         # All suppression type combinations (power set of surpressed_vtypes)
         vtypes = {vtype for vtype in self.vtypes.values() if vtype not in [VariableType.UNKNOWN]}
+        log.info(f"{len(vtypes)} variable types in predicates")
         suppression_combos = []
         if cfg.ENABLE_TYPE_SUPPRESSION:
             for r in range(len(vtypes)):

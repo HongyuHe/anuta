@@ -509,7 +509,7 @@ class Mawi(Constructor):
             by=["flow_ip_1", "flow_ip_2", "flow_port_1", "flow_port_2", "flow_proto", "frame_time_epoch", "frame_number"]
         )
         df = df_sorted.reset_index(drop=True).drop(columns=flow_keys)
-        df = df.drop(columns=['frame_number', 'frame_time_epoch', 'protocol', 'tsval', 'tsecr'])
+        df = df.drop(columns=['frame_number', 'protocol', 'tsval', 'tsecr'])
 
         col_to_var = {col: to_big_camelcase(col, sep='_') for col in df.columns}
         df.rename(columns=col_to_var, inplace=True)
@@ -518,8 +518,15 @@ class Mawi(Constructor):
         ip_map = {ip: i+base_idx for i, ip in enumerate(set(df.IpSrc.unique()) | set(df.IpDst.unique()))}
         df['IpSrc'] = df['IpSrc'].apply(lambda x: ip_map[x])
         df['IpDst'] = df['IpDst'].apply(lambda x: ip_map[x])
-        df = df.astype(int)
+        
         self.df = generate_sliding_windows(df, stride=1, window=3)
+        
+        self.df['InterArrivalMicro_1'] = ((self.df['FrameTimeEpoch_2'] - self.df['FrameTimeEpoch_1'])
+                                        .dt.total_seconds() * 1e6).clip(lower=0) #* ns -> us
+        self.df['InterArrivalMicro_2'] = ((self.df['FrameTimeEpoch_3'] - self.df['FrameTimeEpoch_2'])
+                                        .dt.total_seconds() * 1e6).clip(lower=0)
+        self.df.drop(columns=['FrameTimeEpoch_1', 'FrameTimeEpoch_2', 'FrameTimeEpoch_3'], inplace=True)
+        self.df = self.df.astype(int)
         
         variables = list(self.df.columns)
             
@@ -535,6 +542,52 @@ class Mawi(Constructor):
                 self.constants[name] = Constants(
                     kind=ConstantType.LIMIT,
                     values=netflix_tcplen_limits
+                )
+        
+        multiconstants = []
+        TOP_K = 5
+        for name in self.df.columns:
+            if 'seq' in name.lower():
+                multiconstants.append(
+                    (name, Constants(
+                        kind=ConstantType.ADDITION,
+                        values=netflix_seqnum_increaments))
+                )
+            if 'len' in name.lower():
+                multiconstants.append(
+                    (name, Constants(
+                        kind=ConstantType.LIMIT,
+                        values=netflix_tcplen_limits))
+                )
+            if 'tcplen' in name.lower():
+                top_values = self.df[name].value_counts().nlargest(TOP_K).index.tolist()
+                multiconstants.append(
+                    (name, Constants(
+                        kind=ConstantType.ASSIGNMENT,
+                        values=top_values))
+                )
+            if 'scalefactor' in name.lower():
+                #* TcpWindowSizeScalefactor has a small domain, so we can enumerate it. 
+                #! Have to do this since the values of numerical variables are not enumerated 
+                #!  by default when populating the predicate space.
+                multiconstants.append(
+                    (name, Constants(
+                        kind=ConstantType.ASSIGNMENT,
+                        values=self.df[name].unique().tolist())
+                    )
+                )
+            if 'interarrival' in name.lower():
+                quartiles = get_quartiles(self.df[name])
+                multiconstants.append(
+                    (name, Constants(
+                        kind=ConstantType.LIMIT,
+                        values=quartiles[1:])) #* Exclude the max value.
+                )
+                top_values = self.df[name].value_counts().nlargest(TOP_K).index.tolist()
+                multiconstants.append(
+                    (name, Constants(
+                        kind=ConstantType.ASSIGNMENT,
+                        values=top_values))
                 )
 
         prior_rules = set()
@@ -559,7 +612,8 @@ class Mawi(Constructor):
                                        None, 
                                        self.df[name].unique().tolist())
 
-        self.anuta = Anuta(variables, domains, self.constants, prior_kb=prior_rules)
+        self.anuta = Anuta(variables, domains, self.constants, 
+                           prior_kb=prior_rules, multiconstants=multiconstants)
         # pprint(self.anuta.variables)
         # pprint(self.anuta.domains)
         # pprint(self.anuta.constants)
