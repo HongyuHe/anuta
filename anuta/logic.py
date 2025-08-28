@@ -286,6 +286,7 @@ class LogicLearner(object):
             self.vtypes[var] = get_variable_type(var)
         self.domains = constructor.anuta.domains
         self.constants = constructor.anuta.constants
+        self.multiconstants = constructor.anuta.multiconstants
         
         self.categoricals = [] # constructor.categoricals
         self.prior: Set[Constraint] = set()
@@ -1188,28 +1189,44 @@ class LogicLearner(object):
                 
         '''Augment the variables with constants.'''
         avars = set()
-        for varname, consts in self.constants.items():
+        # for varname, consts in self.constants.items():
+        #     if varname in self.categoricals:
+        #         #* Only augment numerical variables with constants.
+        #         continue
+        #     vtype = variable_types[varname]
+        #     #& X*c 
+        #     if consts.kind == ConstantType.SCALAR:
+        #         for const in consts.values:
+        #             if const == 1: continue
+        #             avar = f"{const}$*${varname}"
+        #             avars.add(avar)
+        #             variable_types[avar] = vtype
+        #     #& X+c
+        #     if consts.kind == ConstantType.ADDITION:
+        #         for const in consts.values:
+        #             avar = f"{const}$+${varname}"
+        #             avars.add(avar)
+        #             variable_types[avar] = vtype
+            
+        for varname, constants in self.multiconstants:
             if varname in self.categoricals:
                 #* Only augment numerical variables with constants.
                 continue
             vtype = variable_types[varname]
             #& X*c 
-            if consts.kind == ConstantType.SCALAR:
-                for const in consts.values:
-                    if const == 1: continue
-                    avar = f"{const}$*${varname}"
+            if constants.kind == ConstantType.SCALAR:
+                for value in constants.values:
+                    if value == 1: continue
+                    avar = f"{value}$*${varname}"
                     avars.add(avar)
                     variable_types[avar] = vtype
-            #& X+c
-            if consts.kind == ConstantType.ADDITION:
-                for const in consts.values:
-                    avar = f"{const}$+${varname}"
+            #& X+c 
+            if constants.kind == ConstantType.ADDITION:
+                for value in constants.values:
+                    avar = f"{value}$+${varname}"
                     avars.add(avar)
                     variable_types[avar] = vtype
-                    
-                # #* default: X+1
-                # avar = f"1+{varname}"
-                # variable_types[avar] = vtype
+
         
         num_avars = len(avars)
         log.info(f"Created {len(avars)} augmented variables.")
@@ -1242,7 +1259,7 @@ class LogicLearner(object):
         
         '''Create predicates for all variables.'''
         varvalues = self.examples.to_dict(orient='series')
-        predicates = set()
+        predicates: Set[str] = set()
         
         #! Restrict LHS to single variables.
         for j, lhs in enumerate(self.variables):
@@ -1254,39 +1271,69 @@ class LogicLearner(object):
             #     continue
             
             #& Predicates with constants.
-            if domaintype_lhs == DomainType.CATEGORICAL:
-                #! Assuming one variable has only one type of constants.
-                if (lhs in self.constants 
-                    and self.constants[lhs].kind == ConstantType.ASSIGNMENT):
-                    #& X=c
-                    for constant in self.constants[lhs].values:
+            for varname, constants in self.multiconstants:
+                if varname != lhs:
+                    #* Find the constants for this variable.
+                    continue
+                #& X=c
+                if constants.kind == ConstantType.ASSIGNMENT:
+                    for constant in constants.values:
                         predicates.add(f"Eq({lhs}, {constant})")
                         predicates.add(f"Ne({lhs}, {constant})")
-                elif vtype_lhs not in [VariableType.IP, VariableType.PORT]:
+                elif (domaintype_lhs == DomainType.CATEGORICAL
+                    and vtype_lhs not in [VariableType.IP, VariableType.PORT]):
                     #* Don't create Eq/Ne predicates for identifiers (IP/PORT).
                     #* Only consider domain values if no constants are defined.
                     #& X=x
                     for value in self.domains[lhs].values:
                         predicates.add(f"Eq({lhs}, {value})")
                         predicates.add(f"Ne({lhs}, {value})")
-            else:
-                #& DomainType.NUMERICAL
-                if (lhs in self.constants
-                    and self.constants[lhs].kind == ConstantType.LIMIT):
-                    #& X > c and X ≤ c
-                    for constant in self.constants[lhs].values:
+
+                #& X > c and X ≤ c
+                if constants.kind == ConstantType.LIMIT:
+                    for constant in constants.values:
                         predicates.add(f"({lhs} > {constant})")
                         if constant != 0:
                             #! Assume no negative values.
                             predicates.add(f"({lhs} <= {constant})")
-                        #? Since we don't care equality (X=c), we omit the following:
-                        # predicates.add(f"({lhs} <= {constant})")
-                        # predicates.add(f"({lhs} > {constant})")
-                #TODO: Enable one var with multiple types of constants.
-                #*  Here, ACK and SEQ numbers require ADDITION (+1) and LIMIT (<1).
-                if vtype_lhs == VariableType.SEQUENCING:
-                    predicates.add(f"({lhs} > 1)")
-                    predicates.add(f"({lhs} <= 1)")
+            #TODO: Move this to constructor.
+            if vtype_lhs == VariableType.SEQUENCING:
+                predicates.add(f"({lhs} > 1)")
+                predicates.add(f"({lhs} <= 1)")
+                
+            # if domaintype_lhs == DomainType.CATEGORICAL:
+                # #! Assuming one variable has only one type of constants.
+                # if (lhs in self.constants 
+                #     and self.constants[lhs].kind == ConstantType.ASSIGNMENT):
+                #     #& X=c
+                #     for constant in self.constants[lhs].values:
+                #         predicates.add(f"Eq({lhs}, {constant})")
+                #         predicates.add(f"Ne({lhs}, {constant})")
+                # elif vtype_lhs not in [VariableType.IP, VariableType.PORT]:
+                #     #* Don't create Eq/Ne predicates for identifiers (IP/PORT).
+                #     #* Only consider domain values if no constants are defined.
+                #     #& X=x
+                #     for value in self.domains[lhs].values:
+                #         predicates.add(f"Eq({lhs}, {value})")
+                #         predicates.add(f"Ne({lhs}, {value})")
+            # else:
+                #& DomainType.NUMERICAL
+                # if (lhs in self.constants
+                #     and self.constants[lhs].kind == ConstantType.LIMIT):
+                #     #& X > c and X ≤ c
+                #     for constants in self.constants[lhs].values:
+                #         predicates.add(f"({lhs} > {constants})")
+                #         if constants != 0:
+                #             #! Assume no negative values.
+                #             predicates.add(f"({lhs} <= {constants})")
+                #         #? Since we don't care equality (X=c), we omit the following:
+                #         # predicates.add(f"({lhs} <= {constant})")
+                #         # predicates.add(f"({lhs} > {constant})")
+                # #TODO: Enable one var with multiple types of constants.
+                # #*  Here, ACK and SEQ numbers require ADDITION (+1) and LIMIT (<1).
+                # if vtype_lhs == VariableType.SEQUENCING:
+                #     predicates.add(f"({lhs} > 1)")
+                #     predicates.add(f"({lhs} <= 1)")
             
             #* Allow all types of variables in the RHS.
             #! Order matters with `j`
@@ -1441,8 +1488,9 @@ class LogicLearner(object):
                 p = Constraint(sp.sympify(p))
                 constraint_predicates.add(p)
         
-        # #* Save predicates to file for inspection.
-        # Theory.save_constraints(constraint_predicates, f'predicates_{self.dataset}.pl')
+        #* Save predicates to file for inspection.
+        # pprint(prior_rules)
+        # Theory.save_constraints(constraint_predicates, f'predicates_{self.dataset}_new.pl')
         # exit(0)
         
         log.info(f"Duplicate predicates found: {len(predicates) - len(constraint_predicates)}")

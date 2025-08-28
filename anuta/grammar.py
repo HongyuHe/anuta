@@ -154,12 +154,14 @@ def group_variables_by_type_and_domain(var_list: List[str]) -> Tuple[
 
 class Anuta(object):
     def __init__(self, variables: List[str], domains: Dict[str, Domain], 
-                 constants: Dict[str, Constants]=None, 
+                 constants: Dict[str, Constants]=None,
+                 multiconstants: List[Tuple[str, Constants]]=None, 
                  prior_kb: List[Constraint | str]=[]):
         variables = sp.symbols(' '.join(variables))
         self.variables: Dict[str, sp.Symbol] = {v.name: v for v in variables}
         self.domains: Dict[str, Domain] = domains
         self.constants: Dict[str, Constants] = constants
+        self.multiconstants: List[Tuple[str, Constants]] = multiconstants
         
         self.prior_kb = prior_kb
         self.initial_kb: List[Constraint] = []

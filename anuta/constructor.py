@@ -751,6 +751,36 @@ class Cidds001(Constructor):
                     #* Sort the values in ascending order.
                     values=sorted(cidds_constants['bytes'])
                 )
+        multiconstants: List[Tuple[str, Constants]] = []
+        TOP_K = 6
+        for name in variables:
+            if 'ip' in name.lower():
+                multiconstants.append(
+                    (name, Constants(kind=ConstantType.ASSIGNMENT, values=cidds_constants['ip']))
+                )
+            if 'pt' in name.lower():
+                multiconstants.append(
+                    (name, Constants(kind=ConstantType.ASSIGNMENT, values=cidds_constants['port']))
+                )
+            if 'packet' in name.lower():
+                multiconstants.append(
+                    (name, Constants(kind=ConstantType.SCALAR, values=sorted(cidds_constants['packet'])))
+                )
+                #* Also add the top 6 most frequent packet values as assignment constants.
+                top_packets = self.df[name].value_counts().nlargest(TOP_K).index.tolist()
+                multiconstants.append(
+                    (name, Constants(kind=ConstantType.ASSIGNMENT, values=top_packets))
+                )
+            if 'bytes' in name.lower():
+                multiconstants.append(
+                    (name, Constants(kind=ConstantType.SCALAR, values=sorted(cidds_constants['bytes'])))
+                )
+                #* Also add the top 6 most frequent byte values as assignment constants.
+                top_bytes = self.df[name].value_counts().nlargest(TOP_K).index.tolist()
+                multiconstants.append(
+                    (name, Constants(kind=ConstantType.ASSIGNMENT, values=top_bytes))
+                )
+        pprint(multiconstants)
         
         prior_rules: Set[str] = set()
         # variables, self.categoricals, prior_rules, self.df = self.build_abstract_domain(
@@ -771,7 +801,8 @@ class Cidds001(Constructor):
                                       None, 
                                       self.df[name].unique())
 
-        self.anuta = Anuta(variables, domains, self.constants, prior_kb=prior_rules)
+        self.anuta = Anuta(variables, domains, self.constants, 
+                           prior_kb=prior_rules, multiconstants=multiconstants)
         # pprint(self.anuta.variables)
         # pprint(self.anuta.domains)
         # pprint(self.anuta.constants)
@@ -841,6 +872,9 @@ class Millisampler(Constructor):
         #* All variables are numerical, so we don't need to specify categoricals.
         self.categoricals = []
         self.feature_marker = 'Agg'
+        
+        todrop = [col for col in self.df.columns if self.feature_marker not in col]
+        self.df.drop(columns=todrop, inplace=True)
         
         self.constants: dict[str, Constants] = {}
         for var in variables:
