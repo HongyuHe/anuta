@@ -924,7 +924,11 @@ class LogicLearner(object):
                                tqdm(evidence_sets,
                                     desc="... Collecting existing predicates from evidence sets")]
         missing_predicates = predicates - set().union(*existing_predicates)
-        log.info(f"Missing {len(missing_predicates)} predicates in the evidence set.")
+        if missing_predicates:
+            log.info(f"Missing {len(missing_predicates)} predicates in the evidence set.")
+        else:
+            log.info("All predicates already covered in the evidence sets.")
+            return evidence_sets
             
         predicates_list = list(predicates) if not missing_predicates else list(missing_predicates)
         log.info(f"Evaluating {len(predicates_list)} predicates over {self.examples.shape[0]} examples...")

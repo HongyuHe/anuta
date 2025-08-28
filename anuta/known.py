@@ -192,8 +192,6 @@ cidds_flags_conversion = bidict({flag: i for i, flag in enumerate(['noflags', 'h
 # https://www.iana.org/assignments/protocol-numbers/protocol-numbers.xhtml
 cidds_proto_conversion = bidict({proto: i for i, proto in enumerate(['TCP', 'UDP', 'ICMP', 'IGMP'])})
 cidds_port_conversion = bidict({port: port for port in cidds_ports + known_ports})
-cidds_flags = ['......','....S.','...R..','...RS.','.A....','.A...F','.A..S.','.A..SF','.A.R..','.A.R.F','.A.RS.','.A.RSF','.AP...','.AP..F','.AP.S.','.AP.SF','.APR..','.APR.F','.APRS.','.APRSF']
-
 
 cidds_port_conversion.inverse[UNINTERESTED_PORT] = 'uninterested'
 cidds_conversions = {
