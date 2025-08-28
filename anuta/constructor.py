@@ -828,6 +828,10 @@ class Cidds001(Constructor):
                 multiconstants.append(
                     (name, Constants(kind=ConstantType.SCALAR, values=sorted(cidds_constants['bytes'])))
                 )
+                quatiles = get_quartiles(self.df[name])
+                multiconstants.append(
+                    (name, Constants(kind=ConstantType.LIMIT, values=quatiles[1:])) #* Exclude the max value.
+                )
                 #* Also add the top 6 most frequent byte values as assignment constants.
                 top_bytes = self.df[name].value_counts().nlargest(TOP_K).index.tolist()
                 multiconstants.append(

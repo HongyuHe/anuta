@@ -304,19 +304,20 @@ class LogicLearner(object):
         """
         log.info(f"Learning denial constraints: Max {max_predicates} predicates, Max {max_learned_rules} rules.")
         predicates: Set[Constraint] = self.generate_predicates_and_prior()
+        # evidence_sets: List[frozenset[Constraint]] = []
+        # #* First check if the evidence sets file exists, if so, load it.
+        # evidence_sets_file = f'data/evidence_sets_{self.dataset}_{self.num_examples}.pkl'
+        # if Path(evidence_sets_file).exists():
+        #     log.info(f"Loading evidence sets from {evidence_sets_file}...")
+        #     with open(evidence_sets_file, 'rb') as f:
+        #         evidence_sets = pickle.load(f)
+        #     log.info(f"Loaded {len(evidence_sets)} evidence sets.")
+        # else:
         
-        #* First check if the evidence sets file exists, if so, load it.
-        evidence_sets_file = f'data/evidence_sets_{self.dataset}_{self.num_examples}.pkl'
-        if Path(evidence_sets_file).exists():
-            log.info(f"Loading evidence sets from {evidence_sets_file}...")
-            with open(evidence_sets_file, 'rb') as f:
-                evidence_sets: List[frozenset[Constraint]] = pickle.load(f)
-            log.info(f"Loaded {len(evidence_sets)} evidence sets.")
-        else:
-            start = perf_counter()
-            evidence_sets: List[frozenset[Constraint]] = self.build_evidence_set(predicates)
-            end = perf_counter()
-            log.info(f"\nBuilt {len(evidence_sets)} evidence sets in {end - start:.2f} seconds.")
+        start = perf_counter()
+        evidence_sets: List[frozenset[Constraint]] = self.build_evidence_set(predicates)
+        end = perf_counter()
+        log.info(f"\nBuilt {len(evidence_sets)} evidence sets in {end - start:.2f} seconds.")
         
         assert len(evidence_sets) == self.examples.shape[0], \
             f"Evidence sets size {len(evidence_sets)} != the # of examples {self.examples.shape[0]}."    
@@ -362,227 +363,6 @@ class LogicLearner(object):
         Theory.save_constraints(learned_rules, f'denial_{self.dataset}_{self.num_examples}_p{max_predicates}.pl')
         return
         
-        
-    def enumerate_minimal_hitting_sets(
-        self,
-        evidence_sets: List[frozenset[Constraint]],
-        max_size: Optional[int] = None,
-        max_solutions: Optional[int] = None,
-    ) -> List[Set[Constraint]]:
-        """
-        Enumerate all minimal hitting sets H such that ∀E in evidence_sets: H ∩ E ≠ ∅.
-
-        Parameters
-        ----------
-        evidence_sets : list of frozenset[Constraint]
-            Non-empty evidence sets (one per tuple).
-        max_size : Optional[int]
-            Upper bound on the size of hitting sets (branch-and-bound). If None, no size bound.
-        max_solutions : Optional[int]
-            Stop after enumerating this many minimal solutions (optional).
-
-        Returns
-        -------
-        List[Set[Constraint]]
-            All minimal hitting sets found (as sets of Constraint).
-        """
-        if not evidence_sets:
-            return []
-        
-        # Index: for each predicate, which evidence indices contain it?
-        idx_by_pred: Dict[Constraint, Set[int]] = defaultdict(set)
-        for i, E in enumerate(tqdm(evidence_sets, desc="... Indexing predicates in evidence sets")):
-            for p in E:
-                idx_by_pred[p].add(i)
-
-        # #* Filter out predicates with WINDOW or SIZE variables for testing.
-        # for predicate in list(idx_by_pred.keys()):
-        #     variables = predicate.expr.free_symbols
-        #     if any(self.vtypes[str(v)] in [VariableType.WINDOW, VariableType.SIZE] 
-        #             for v in variables):
-        #         del idx_by_pred[predicate]
-                
-        # Precompute each evidence set as a list to iterate deterministically
-        E_list: List[List[Constraint]] = [list(E) for E in evidence_sets]
-
-        
-        # pred_order = [p for p, _ in idx_by_pred.items()]
-        
-        # #* Predicate ordering: higher type priority first, then higher coverage
-        # log.info("Ordering predicates by type...")
-        # def _get_pred_score(p: Constraint, covered_examples):
-        #     cov = len(covered_examples)
-        #     type_score = max(
-        #         TYPE_PRIORITY.get(self.vtypes[str(var)], 0)
-        #         for var in p.expr.free_symbols
-        #     )
-        #     return (type_score, cov)
-        
-        # pred_by_score = sorted(
-        #     idx_by_pred.items(),
-        #     key=lambda kv: (-_get_pred_score(kv[0], kv[1])[0],   # higher type priority first
-        #                     # -_get_pred_score(kv[0], kv[1])[1]    # then higher coverage
-        #                 )
-        # )
-        # pred_order = [p for p, _ in pred_by_score]
-        
-        #* Predicate ordering: higher coverage first (helps pruning) [Chu et al., VLDB '13]
-        log.info("Ordering predicates by coverage...")
-        pred_by_cov = sorted(idx_by_pred.items(), key=lambda kv: -len(kv[1]))
-        pred_order = [p for p, _ in pred_by_cov]
-
-        solutions: List[frozenset[Constraint]] = []
-
-        # Quick helper: prune if chosen is a superset of an existing minimal solution.
-        def _dominated_by_existing(chosen: Set[Constraint]) -> bool:
-            fc = frozenset(chosen)
-            for sol in solutions:
-                # if chosen is a superset of a found minimal solution, it can’t be minimal
-                if sol.issubset(fc):
-                    return True
-            return False
-
-        # Check coverage
-        FULL = set(range(len(E_list)))
-
-        #* Optimistic bound on remaining picks:
-        # If we still need to cover R uncovered evidences, and the best single predicate
-        # can cover at most M of them, then we need at least ceil(|R|/M) more predicates.
-        # If len(chosen) + that lower bound > max_size, prune.
-        # (Simple but effective for a BnB cut.)
-        def _optimistic_lb(uncovered: Set[int]) -> int:
-            if not uncovered:
-                return 0
-            best_gain = 0
-            for p in pred_order:
-                gain = len(uncovered & idx_by_pred[p])
-                if gain > best_gain:
-                    best_gain = gain
-                    if best_gain == len(uncovered):
-                        break
-            return 1 if best_gain == 0 else ( (len(uncovered) + best_gain - 1) // best_gain )
-
-        #* Choose an uncovered evidence with the fewest predicates (fail-first)
-        def _pick_uncovered_with_smallest_branch(uncovered: Set[int], chosen: Set[Constraint]) -> int:
-            best_i, best_deg = None, float('inf')
-            for i in uncovered:
-                # candidates are predicates in E[i]; we can skip those already in chosen,
-                # but keeping them is fine — small effect on degree.
-                deg = len(E_list[i])
-                if deg < best_deg:
-                    best_deg = deg
-                    best_i = i
-            return best_i  # index in E_list
-        
-        def _predicate_type_priority(p: Constraint) -> int:
-            #TODO: Only need the first var since all vars in a predicate have the same type.
-            vars_in_p = [str(v) for v in p.expr.free_symbols]
-            if not vars_in_p:
-                return 1  # fallback
-            return max(
-                TYPE_PRIORITY.get(self.vtypes[var], 0)
-                for var in vars_in_p
-            )
-
-        # DFS
-        def dfs(chosen: Set[Constraint], covered: Set[int]):
-            # Early domination prune
-            if _dominated_by_existing(chosen):
-                return
-
-            # Covered all evidences? record a minimal solution
-            if covered == FULL:
-                fc = frozenset(chosen)
-
-                # --- compute new solution set and net change ---
-                old_len = len(solutions)
-                keep: List[frozenset[Constraint]] = []
-                for s in solutions:
-                    if s.issubset(fc):
-                        # existing is smaller/equal → new is not minimal
-                        if s != fc:
-                            return
-                    elif fc.issubset(s):
-                        # new is smaller → drop the old superset
-                        continue
-                    keep.append(s)
-
-                #* Replace in place to preserve references
-                solutions.clear()
-                solutions.extend(keep)
-                solutions.append(fc)
-
-                new_len = len(solutions)
-                delta = new_len - old_len
-                #* delta can be negative when we prune supersets.
-                progress.update(delta)
-
-                # Optional cap
-                if max_solutions is not None and len(solutions) >= max_solutions:
-                    return
-                return
-
-            # BnB size bound
-            if max_size is not None and len(chosen) >= max_size:
-                return
-
-            # Remaining uncovered
-            uncovered = FULL - covered
-
-            #* BnB optimistic bound
-            if max_size is not None:
-                lb = _optimistic_lb(uncovered)
-                if len(chosen) + lb > max_size:
-                    return
-
-            #* Branch on the uncovered evidence covered by fewest predicates (fail-first)
-            pivot = _pick_uncovered_with_smallest_branch(uncovered, chosen)
-            
-            #* Order candidate predicates by descending marginal gain
-            #*  where gain is the number of uncovered evidences they cover.
-            predicates = sorted(
-                E_list[pivot],
-                key=lambda p: -len((idx_by_pred[p]) & uncovered)
-            )
-            
-            # #* Order candidate predicates by descending score
-            # predicates = sorted(
-            #     E_list[pivot],
-            #     key=lambda p: (
-            #         -_predicate_type_priority(p),            # prioritize by type
-            #         # -len((idx_by_pred[p]) & uncovered)      # then by coverage gain
-            #     )
-            # )
-
-
-            for p in predicates:
-                if p in chosen:
-                    # Already picked (rare in this branch), but continue recursion to avoid duplicates
-                    new_chosen = chosen
-                    new_covered = covered
-                else:
-                    new_chosen = set(chosen)
-                    new_chosen.add(p)
-                    new_covered = covered | idx_by_pred[p]
-
-                # Another quick domination check before descending
-                if _dominated_by_existing(new_chosen):
-                    continue
-
-                dfs(new_chosen, new_covered)
-
-                #* Early stop if we reached the cap
-                if max_solutions is not None and len(solutions) >= max_solutions:
-                    return
-
-        progress = tqdm(desc=f"... Enumerating hitting sets ({max_size=})", 
-                        unit=" sets", total=max_solutions)
-        dfs(set(), set())
-
-        # Convert back to list[set]
-        return [set(s) for s in solutions]
-
-
     def enumerate_minimal_hitting_sets_suppression(
         self,
         # predicates,
@@ -1131,7 +911,25 @@ class LogicLearner(object):
     
     def build_evidence_set(self, predicates: Set[Constraint], save: bool = True) -> List[Set[Constraint]]:
         # Pre-pack predicates into a list so all workers use same reference
-        predicates_list = list(predicates)
+        evidence_sets: List[Set[Constraint]] = []
+        #* First check if the evidence sets file exists, if so, load it.
+        evidence_sets_file = f'data/evidence_sets_{self.dataset}_{self.num_examples}.pkl'
+        if Path(evidence_sets_file).exists():
+            log.info(f"Loading evidence sets from {evidence_sets_file}...")
+            with open(evidence_sets_file, 'rb') as f:
+                evidence_sets = pickle.load(f)
+            log.info(f"Loaded {len(evidence_sets)} evidence sets.")
+        
+        existing_predicates = [_predicates for _predicates in 
+                               tqdm(evidence_sets,
+                                    desc="... Collecting existing predicates from evidence sets")]
+        missing_predicates = predicates - set().union(*existing_predicates)
+        log.info(f"Missing {len(missing_predicates)} predicates in the evidence set.")
+            
+        predicates_list = list(predicates) if not missing_predicates else list(missing_predicates)
+        log.info(f"Evaluating {len(predicates_list)} predicates over {self.examples.shape[0]} examples...")
+        # pprint(missing_predicates)
+        # exit(0)
 
         def _process_examples(worker_id, df_chunk: pd.DataFrame) -> List[Set[Constraint]]:
             chunk_results = []
@@ -1162,7 +960,14 @@ class LogicLearner(object):
             for i, chunk in enumerate(chunks)
         )
         
-        results = [s for chunk in results for s in chunk]  # Flatten list of lists
+        results: List[Set[Constraint]] = [s for chunk in results for s in chunk]  # Flatten list of lists
+        #* Merge with existing evidence sets if any
+        if evidence_sets:
+            if len(evidence_sets) != len(results):
+                log.error(f"Existing evidence sets size {len(evidence_sets)} != new results size {len(results)}.")
+            else:
+                for i in tqdm(range(len(results)), desc="... Merging evidence sets"):
+                    results[i] = results[i].union(evidence_sets[i])
         if save:
             with open(f"evidence_sets_{self.dataset}_{self.num_examples}.pkl", 'wb') as f:
                 pickle.dump(results, f)
