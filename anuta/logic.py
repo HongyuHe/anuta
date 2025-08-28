@@ -736,8 +736,8 @@ class LogicLearner(object):
 
                 #& Load candidates if first time
                 if candidates is None:
-                    pivot = _pick_uncovered_with_smallest_branch(uncovered)
-                    # pivot = _pick_uncovered_with_smallest_unchosen(uncovered, chosen)
+                    # pivot = _pick_uncovered_with_smallest_branch(uncovered)
+                    pivot = _pick_uncovered_with_smallest_unchosen(uncovered, chosen)
                     candidates = [p for p in E_list[pivot] if p in allowed_predicates]
                     # sort by coverage gain
                     candidates = sorted(candidates, key=lambda p: -len((idx_by_pred[p]) & uncovered))

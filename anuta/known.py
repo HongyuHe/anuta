@@ -22,6 +22,54 @@ known_ports = [
 ]
 UNINTERESTED_PORT = 60_000  # Default value for unknown ports
 
+def tcpflags2hex(dot_flags: str) -> str:
+    """
+    Convert Wireshark-style TCP flag string (e.g. '.APRSF') into hex value (string).
+    """
+    mapping = {
+        'C': 0x80,  # CWR
+        'E': 0x40,  # ECE
+        'U': 0x20,  # URG
+        'A': 0x10,  # ACK
+        'P': 0x08,  # PSH
+        'R': 0x04,  # RST
+        'S': 0x02,  # SYN
+        'F': 0x01,  # FIN
+    }
+    value = 0
+    for ch in dot_flags:
+        if ch in mapping:
+            value |= mapping[ch]
+    return hex(value)
+
+def hex2tcpflags(bitmask) -> str:
+    """
+    Convert a numeric TCP flags bitmask to a list of corresponding flag names.
+
+    :param bitmask: Numeric bitmask of TCP flags (integer).
+    :return: List of flag names joined by hyphens.
+    """
+    if isinstance(bitmask, str):
+        bitmask = int(bitmask, base=16)
+    elif isinstance(bitmask, int):
+        hex
+    if bitmask < 0: return ""
+    
+    #* Define TCP flags and their corresponding bit positions
+    flags = [
+        (0x01, "FIN"),  # 0b00000001
+        (0x02, "SYN"),  # 0b00000010
+        (0x04, "RST"),  # 0b00000100
+        (0x08, "PSH"),  # 0b00001000
+        (0x10, "ACK"),  # 0b00010000
+        (0x20, "URG"),  # 0b00100000
+        (0x40, "ECE"),  # 0b01000000
+        (0x80, "CWR"),  # 0b10000000
+    ]
+    
+    #* Extract flags from the bitmask
+    result = [name for bit, name in flags if bitmask & bit]
+    return '-'.join(result) if result else 'none'
 #************************* Domain Knowledge begins *************************
 metadc_ints = ['IngressBytesAgg','EgressBytesAgg','InRxmitBytesAgg','OutRxmitBytesAgg','InCongestionBytesAgg','ConnectionsAgg','IngressBytes0','IngressBytes1','IngressBytes2','IngressBytes3','IngressBytes4','IngressBytes5','IngressBytes6','IngressBytes7','IngressBytes8','IngressBytes9','IngressBytes10','IngressBytes11','IngressBytes12','IngressBytes13','IngressBytes14','IngressBytes15','IngressBytes16','IngressBytes17','IngressBytes18','IngressBytes19','IngressBytes20','IngressBytes21','IngressBytes22','IngressBytes23','IngressBytes24','IngressBytes25','IngressBytes26','IngressBytes27','IngressBytes28','IngressBytes29','IngressBytes30','IngressBytes31','IngressBytes32','IngressBytes33','IngressBytes34','IngressBytes35','IngressBytes36','IngressBytes37','IngressBytes38','IngressBytes39','IngressBytes40','IngressBytes41','IngressBytes42','IngressBytes43','IngressBytes44','IngressBytes45','IngressBytes46','IngressBytes47','IngressBytes48','IngressBytes49']
 
@@ -130,6 +178,7 @@ cidds_categoricals = ['Flags', 'Proto', 'SrcIpAddr', 'DstIpAddr'] + ['SrcPt', 'D
 cidds_numericals = ['Packets', 'Bytes', 'Duration']
 cidds_ips = ['private_p2p', 'private_broadcast', '0.0.0.0', 'public_p2p', 'dns']
 cidds_ports = [0, 3, 8, 11, 22, 25, 
+               445, 8082, 5353, 8000, 587,
             #    23, #* Telnet
             #    8000, #* Seafile Server
                53, 67, 68, 80, 123, 137, 138, 443, 993, 8080]
@@ -143,6 +192,9 @@ cidds_flags_conversion = bidict({flag: i for i, flag in enumerate(['noflags', 'h
 # https://www.iana.org/assignments/protocol-numbers/protocol-numbers.xhtml
 cidds_proto_conversion = bidict({proto: i for i, proto in enumerate(['TCP', 'UDP', 'ICMP', 'IGMP'])})
 cidds_port_conversion = bidict({port: port for port in cidds_ports + known_ports})
+cidds_flags = ['......','....S.','...R..','...RS.','.A....','.A...F','.A..S.','.A..SF','.A.R..','.A.R.F','.A.RS.','.A.RSF','.AP...','.AP..F','.AP.S.','.AP.SF','.APR..','.APR.F','.APRS.','.APRSF']
+
+
 cidds_port_conversion.inverse[UNINTERESTED_PORT] = 'uninterested'
 cidds_conversions = {
     'ip': cidds_ip_conversion,
@@ -188,6 +240,7 @@ def cidds_ip_map(ip: str):
     return cidds_ip_conversion[new_ip]
 
 def cidds_flag_map(flag: str):
+    # return int(tcpflags2hex(flag), 16)
 	#! Don't consider the specific 'Flags' values for now
     new_flag = ''
     if flag == '......':

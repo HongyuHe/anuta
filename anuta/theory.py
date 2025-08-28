@@ -463,11 +463,12 @@ class Theory(object):
             if 'Ip' in varname:
                 value = cidds_ip_conversion.inverse[varval]
             elif 'Flags' in varname:
-                value = cidds_flags_conversion.inverse[varval]
+                # value = cidds_flags_conversion.inverse[varval]
+                value = hex2tcpflags(varval)
             elif 'Proto' in varname:
                 value = cidds_proto_conversion.inverse[varval]
-            # elif 'Pt' in varname:
-            #     value = cidds_port_conversion.inverse[varval]
+            elif 'Pt' in varname:
+                value = 'unknown_port' if varval == UNINTERESTED_PORT else varval
             else:
                 value = varval
             return value
@@ -477,7 +478,7 @@ class Theory(object):
                 return varval
             
             if 'TcpFlags' in varname:
-                return get_tcp_flags(varval)
+                return hex2tcpflags(varval)
             else:
                 return varval
         
@@ -571,6 +572,16 @@ class Theory(object):
         }
         interpreted = [eval(sp.srepr(rule), interpretation) for rule in rules]
         translated = [_translate_to_english(rule, dataset) for rule in interpreted]
+        interpreted_filtered = []
+        translated_filtered = []
+        # for rule in interpreted:
+        #     if 'unknown_port' not in rule:
+        #         interpreted_filtered.append(rule)
+        # for rule in translated:
+        #     if 'unknown_port' not in rule:
+        #         translated_filtered.append(rule)
+        # interpreted = interpreted_filtered
+        # translated = translated_filtered
         
         if save_path:
             with open(save_path, 'w') as f:

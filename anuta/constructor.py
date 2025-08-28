@@ -721,6 +721,8 @@ class Cidds001(Constructor):
         self.df['SrcPt'] = self.df['SrcPt'].apply(cidds_port_map)
         self.df['DstPt'] = self.df['DstPt'].apply(cidds_port_map)
         self.categoricals = cidds_categoricals
+        # self.df.to_csv('cidds_wk3_learn.csv', index=False)
+        # exit(0)
         
         #* Add the constants associated with the vars.
         #! One variable currently has only one type of constants.
