@@ -597,7 +597,7 @@ class Netflix(Constructor):
             print(f"Flow {flow_id}: {len(flow_df)} packets")
         #! Assuming a single (bidirectional) flow for now.
         self.df = flow_df.drop(columns=flow_keys)
-        todrop = ['frame_number', 'frame_time_epoch', 'protocol', 'frame_len', 'ip_version']
+        todrop = ['frame_number', 'protocol', 'frame_len', 'ip_version', 'tcp_urgent_pointer']
         for col in todrop:
             if col in self.df.columns:
                 self.df.drop(columns=[col], inplace=True)
@@ -613,10 +613,16 @@ class Netflix(Constructor):
         port_map = {port: i for i, port in enumerate(self.df.TcpSrcport.unique())}
         self.df['TcpSrcport'] = self.df['TcpSrcport'].apply(lambda x: port_map[x])
         self.df['TcpDstport'] = self.df['TcpDstport'].apply(lambda x: port_map[x])
-        self.df = self.df.astype(int)
         
         self.df = generate_sliding_windows(self.df, stride=STRIDE, window=WINDOW)
         # self.df = self.df[[bool(n) for n in ctgan_discriminator_labels]]
+        
+        self.df['InterArrivalMicro_1'] = ((self.df['FrameTimeEpoch_2'] - self.df['FrameTimeEpoch_1'])
+                                        .dt.total_seconds() * 1e6) #* ns -> us
+        self.df['InterArrivalMicro_2'] = ((self.df['FrameTimeEpoch_3'] - self.df['FrameTimeEpoch_2'])
+                                        .dt.total_seconds() * 1e6)
+        self.df.drop(columns=['FrameTimeEpoch_1', 'FrameTimeEpoch_2', 'FrameTimeEpoch_3'], inplace=True)
+        self.df = self.df.astype(int)
         
         variables = list(self.df.columns)
         # self.categoricals = []
@@ -636,6 +642,50 @@ class Netflix(Constructor):
                 self.constants[name] = Constants(
                     kind=ConstantType.LIMIT,
                     values=netflix_tcplen_limits
+                )
+                
+        multiconstants = []
+        TOP_K = 5
+        for name in self.df.columns:
+            if 'seq' in name.lower():
+                multiconstants.append(
+                    (name, Constants(
+                        kind=ConstantType.ADDITION,
+                        values=netflix_seqnum_increaments))
+                )
+            if 'len' in name.lower():
+                multiconstants.append(
+                    (name, Constants(
+                        kind=ConstantType.LIMIT,
+                        values=netflix_tcplen_limits))
+                )
+            if 'tcplen' in name.lower():
+                top_values = self.df[name].value_counts().nlargest(TOP_K).index.tolist()
+                multiconstants.append(
+                    (name, Constants(
+                        kind=ConstantType.ASSIGNMENT,
+                        values=top_values))
+                )
+            if 'scalefactor' in name.lower():
+                #* TcpWindowSizeScalefactor has a small domain, so we can enumerate it.  
+                multiconstants.append(
+                    (name, Constants(
+                        kind=ConstantType.ASSIGNMENT,
+                        values=self.df[name].unique().tolist())
+                    )
+                )
+            if 'interarrival' in name.lower():
+                quartiles = get_quartiles(self.df[name])
+                multiconstants.append(
+                    (name, Constants(
+                        kind=ConstantType.LIMIT,
+                        values=quartiles[1:])) #* Exclude the max value.
+                )
+                top_values = self.df[name].value_counts().nlargest(TOP_K).index.tolist()
+                multiconstants.append(
+                    (name, Constants(
+                        kind=ConstantType.ASSIGNMENT,
+                        values=top_values))
                 )
                 
         prior_rules = []
@@ -660,7 +710,8 @@ class Netflix(Constructor):
                                        None, 
                                        self.df[name].unique().tolist())
         
-        self.anuta = Anuta(variables, domains, self.constants, prior_kb=prior_rules)
+        self.anuta = Anuta(variables, domains, self.constants, 
+                           prior_kb=prior_rules, multiconstants=multiconstants)
         # pprint(self.anuta.variables)
         # pprint(self.anuta.domains)
         # pprint(self.anuta.constants)

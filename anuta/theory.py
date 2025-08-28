@@ -450,13 +450,11 @@ class Theory(object):
     @staticmethod
     def interpret(rules: List[sp.Expr], dataset: str='pcap', 
                   save_path=None) -> sp.Expr:
-        assert dataset in ['pcap', 'netflow'], f"Unknown dataset {dataset} for interpretation."
+        assert dataset in ['pcap', 'netflow', 'measurement'],\
+            f"Unknown dataset {dataset} for interpretation."
         
         #* CIDDs specific conversions.
         def _interpret_netflow(varname, varval):
-            # varval = int(varval)
-            # if any([op in varval for op in ['=', '≠', '∧', '∨', '⇒', '≥', '×']]):
-            #     return value
             if not isinstance(varval, int):
                 return varval
             
@@ -531,6 +529,8 @@ class Theory(object):
             _interpret = _interpret_netflow
         elif dataset == 'pcap':
             _interpret = _interpret_pcap
+        else:
+            _interpret = lambda a, b: b
 
         def eq_str(a, b): return f"({a} = {_interpret(a, b)})"
         def ne_str(a, b): return f"({a} ≠ {_interpret(a, b)})"

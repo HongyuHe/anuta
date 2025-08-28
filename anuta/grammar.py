@@ -72,6 +72,7 @@ class VariableType(Enum):
     AGGREGATE = auto()
     MEASUREMENT = auto()
     COUNT = auto()
+    INTERARRIVAL = auto()
     UNKNOWN = auto()
 
 
@@ -91,6 +92,7 @@ TYPE_DOMIAN = {
     VariableType.AGGREGATE: DomainType.NUMERICAL,
     VariableType.MEASUREMENT: DomainType.NUMERICAL,
     VariableType.COUNT: DomainType.NUMERICAL,
+    VariableType.INTERARRIVAL: DomainType.NUMERICAL,
     VariableType.UNKNOWN: "unknown"
 }
 
@@ -122,7 +124,10 @@ def get_variable_type(name: str) -> VariableType:
         return VariableType.POINTER
     elif 'window' in lname:
         return VariableType.WINDOW
-    elif any(k in lname for k in ('tsval', 'tsecr', 'time', 'duration', 'epoch', 'date')):
+    elif 'interarrival' in lname:
+        return VariableType.INTERARRIVAL
+    elif any(k in lname for k in ('tsval', 'tsecr', 'time', 
+                                  'duration', 'epoch', 'date')):
         return VariableType.TIME
     elif any(k in lname for k in ('proto', 'version')):
         return VariableType.PROTO

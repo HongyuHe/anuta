@@ -1174,7 +1174,7 @@ class LogicLearner(object):
     def generate_predicates_and_prior(self) -> Set[Constraint]:
         vtype2vars, domaintype2vars = group_variables_by_type_and_domain(self.variables)
         variable_types = self.vtypes
-        pprint(vtype2vars)
+        # pprint(vtype2vars)
         
         prior_rules: Set[str] = set()
         #* Collecting categorical variables (with >1 unique value).
@@ -1489,8 +1489,8 @@ class LogicLearner(object):
                 p = Constraint(sp.sympify(p))
                 constraint_predicates.add(p)
         
-        #* Save predicates to file for inspection.
-        # pprint(prior_rules)
+        # #* Save predicates to file for inspection.
+        # # pprint(prior_rules)
         # Theory.save_constraints(constraint_predicates, f'predicates_{self.dataset}_new.pl')
         # exit(0)
         
