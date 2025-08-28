@@ -380,7 +380,7 @@ class LogicLearner(object):
             return []
 
         # All suppression type combinations (power set of surpressed_vtypes)
-        vtypes = [vtype for vtype in VariableType if vtype not in [VariableType.UNKNOWN]]
+        vtypes = {vtype for vtype in self.vtypes.values() if vtype not in [VariableType.UNKNOWN]}
         suppression_combos = []
         if cfg.ENABLE_TYPE_SUPPRESSION:
             for r in range(len(vtypes)):
