@@ -1175,6 +1175,7 @@ class LogicLearner(object):
         vtype2vars, domaintype2vars = group_variables_by_type_and_domain(self.variables)
         variable_types = self.vtypes
         # pprint(vtype2vars)
+        # exit(0)
         
         prior_rules: Set[str] = set()
         #* Collecting categorical variables (with >1 unique value).
@@ -1277,19 +1278,10 @@ class LogicLearner(object):
                     #* Find the constants for this variable.
                     continue
                 #& X=c
-                if constants.kind == ConstantType.ASSIGNMENT:
+                if varname == lhs and constants.kind == ConstantType.ASSIGNMENT:
                     for constant in constants.values:
                         predicates.add(f"Eq({lhs}, {constant})")
                         predicates.add(f"Ne({lhs}, {constant})")
-                elif (domaintype_lhs == DomainType.CATEGORICAL
-                    and vtype_lhs not in [VariableType.IP, VariableType.PORT]):
-                    #* Don't create Eq/Ne predicates for identifiers (IP/PORT).
-                    #* Only consider domain values if no constants are defined.
-                    #& X=x
-                    for value in self.domains[lhs].values:
-                        predicates.add(f"Eq({lhs}, {value})")
-                        predicates.add(f"Ne({lhs}, {value})")
-
                 #& X > c and X ≤ c
                 if constants.kind == ConstantType.LIMIT:
                     for constant in constants.values:
@@ -1297,6 +1289,14 @@ class LogicLearner(object):
                         if constant != 0:
                             #! Assume no negative values.
                             predicates.add(f"({lhs} <= {constant})")
+            if (domaintype_lhs == DomainType.CATEGORICAL
+                and vtype_lhs not in [VariableType.IP, VariableType.PORT]):
+                #* Don't create Eq/Ne predicates for identifiers (IP/PORT).
+                #* Only consider domain values if no constants are defined.
+                #& X=x
+                for value in self.domains[lhs].values:
+                    predicates.add(f"Eq({lhs}, {value})")
+                    predicates.add(f"Ne({lhs}, {value})")
             #TODO: Move this to constructor.
             if vtype_lhs == VariableType.SEQUENCING:
                 predicates.add(f"({lhs} > 1)")

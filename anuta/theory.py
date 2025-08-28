@@ -452,6 +452,20 @@ class Theory(object):
                   save_path=None) -> sp.Expr:
         assert dataset in ['pcap', 'netflow', 'measurement'],\
             f"Unknown dataset {dataset} for interpretation."
+            
+        #* Convert to implications
+        converted = []
+        for expr in rules:
+            if isinstance(expr, sp.Or):
+                # Extract the first term and the rest of the terms
+                antecedent = sp.Not(expr.args[0])
+                consequent = sp.Or(*expr.args[1:])
+                
+                # Create the implication
+                converted.append(sp.Implies(antecedent, consequent))
+            else:
+                converted.append(expr)
+        rules = converted
         
         #* CIDDs specific conversions.
         def _interpret_netflow(varname, varval):

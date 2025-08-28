@@ -667,7 +667,9 @@ class Netflix(Constructor):
                         values=top_values))
                 )
             if 'scalefactor' in name.lower():
-                #* TcpWindowSizeScalefactor has a small domain, so we can enumerate it.  
+                #* TcpWindowSizeScalefactor has a small domain, so we can enumerate it. 
+                #! Have to do this since the values of numerical variables are not enumerated 
+                #!  by default when populating the predicate space.
                 multiconstants.append(
                     (name, Constants(
                         kind=ConstantType.ASSIGNMENT,
@@ -831,7 +833,7 @@ class Cidds001(Constructor):
                 multiconstants.append(
                     (name, Constants(kind=ConstantType.ASSIGNMENT, values=top_bytes))
                 )
-        pprint(multiconstants)
+        # pprint(multiconstants)
         
         prior_rules: Set[str] = set()
         # variables, self.categoricals, prior_rules, self.df = self.build_abstract_domain(
