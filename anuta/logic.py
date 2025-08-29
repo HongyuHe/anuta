@@ -896,21 +896,20 @@ class LogicLearner(object):
             with open(evidence_sets_file, 'rb') as f:
                 evidence_sets = pickle.load(f)
             log.info(f"Loaded {len(evidence_sets)} evidence sets.")
-            return evidence_sets
         
-        missing_predicates = set()
-        #! Below check doesn't consider contradictory predicates that no example can satisfy.
-        # existing_predicates = [_predicates for _predicates in 
-        #                        tqdm(evidence_sets,
-        #                             desc="... Collecting existing predicates from evidence sets")]
-        # missing_predicates = predicates - set().union(*existing_predicates)
-        # if missing_predicates:
-        #     log.info(f"Missing {len(missing_predicates)} predicates in the evidence set.")
-        # else:
-        #     log.info("All predicates already covered in the evidence sets.")
-        #     return evidence_sets
+            missing_predicates = set()
+            # ! Below check doesn't consider contradictory predicates that no example can satisfy.
+            existing_predicates = [_predicates for _predicates in 
+                                tqdm(evidence_sets,
+                                        desc="... Collecting existing predicates from evidence sets")]
+            missing_predicates = predicates - set().union(*existing_predicates)
+            if missing_predicates:
+                log.warning(f"Missing {len(missing_predicates)} predicates in the evidence set.")
+            else:
+                log.info("All predicates already covered in the evidence sets.")
+            return evidence_sets
             
-        predicates_list = list() if not missing_predicates else list(missing_predicates)
+        predicates_list = list(predicates) # list() if not missing_predicates else list(missing_predicates)
         log.info(f"Evaluating {len(predicates_list)} predicates over {self.examples.shape[0]} examples...")
         # pprint(missing_predicates)
         # exit(0)
