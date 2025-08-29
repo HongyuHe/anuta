@@ -896,6 +896,7 @@ class LogicLearner(object):
             with open(evidence_sets_file, 'rb') as f:
                 evidence_sets = pickle.load(f)
             log.info(f"Loaded {len(evidence_sets)} evidence sets.")
+            return evidence_sets
         
         missing_predicates = set()
         #! Below check doesn't consider contradictory predicates that no example can satisfy.
@@ -909,7 +910,7 @@ class LogicLearner(object):
         #     log.info("All predicates already covered in the evidence sets.")
         #     return evidence_sets
             
-        predicates_list = list(predicates) if not missing_predicates else list(missing_predicates)
+        predicates_list = list() if not missing_predicates else list(missing_predicates)
         log.info(f"Evaluating {len(predicates_list)} predicates over {self.examples.shape[0]} examples...")
         # pprint(missing_predicates)
         # exit(0)
