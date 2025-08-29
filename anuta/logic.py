@@ -365,7 +365,6 @@ class LogicLearner(object):
         
     def enumerate_minimal_hitting_sets_suppression(
         self,
-        # predicates,
         evidence_sets: List[frozenset[Constraint]],
         max_size: Optional[int] = None,
         max_solutions: Optional[int] = None,
@@ -375,13 +374,12 @@ class LogicLearner(object):
         Iterative stack-based DFS (no recursion).
         Runs multiple searches with different suppression subsets of variable types,
         combining results with global pruning for maximum diversity.
+        Enforces variable-disjointness: predicates in a hitting set cannot share variables.
         """
         if not evidence_sets:
             return []
 
-        # All suppression type combinations (power set of surpressed_vtypes)
         vtypes = {vtype for vtype in self.vtypes.values() if vtype not in [VariableType.UNKNOWN]}
-        log.info(f"{len(vtypes)} variable types in predicates")
         suppression_combos = []
         if cfg.ENABLE_TYPE_SUPPRESSION:
             for r in range(len(vtypes)):
@@ -389,33 +387,18 @@ class LogicLearner(object):
                     suppression_combos.append(set(combo))
         else:
             suppression_combos.append(set())
-            
-        # allowed = [VariableType.IP, VariableType.PORT, VariableType.SEQUENCING, VariableType.FLAG]
-        # suppression_combos = [{vtype for vtype in VariableType if vtype not in allowed}]
-        log.info(f"Launching searches with {len(suppression_combos)} suppression sets.")
-        
-        #* Sort the combos from largest to smallest (suppressing more types first)
-        suppression_combos.sort(key=lambda s: -len(s))
-        
-        # Build idx_by_pred (same for all runs)
+
+        suppression_combos.sort(key=lambda s: -len(s))  # larger suppressions first
+
+        # Build idx_by_pred
         idx_by_pred: Dict[Constraint, Set[int]] = defaultdict(set)
         for i, E in enumerate(tqdm(evidence_sets, desc="... Indexing predicates in evidence sets")):
             for p in E:
                 idx_by_pred[p].add(i)
-        
-        # indexed_preds = list(idx_by_pred.keys())
-        # missing_preds = set()
-        # for predicate in predicates:        
-        #     if predicate not in indexed_preds:
-        #         missing_preds.add(predicate)
-        # print(f"Predicates not in any evidence set: {len(missing_preds)} / {len(predicates)}")
-        # pprint(missing_preds)
-        # exit(0)
-        
+
         E_list: List[List[Constraint]] = [list(E) for E in evidence_sets]
         FULL = set(range(len(E_list)))
 
-        # Global solutions across all runs
         global_solutions: List[frozenset[Constraint]] = []
 
         def _dominated_by_existing(chosen: Set[Constraint]) -> bool:
@@ -431,10 +414,9 @@ class LogicLearner(object):
             best_gain = 0
             for p in idx_by_pred:
                 gain = len(uncovered & idx_by_pred[p])
-                if gain > best_gain:
-                    best_gain = gain
-                    if best_gain == len(uncovered):
-                        break
+                best_gain = max(best_gain, gain)
+                if best_gain == len(uncovered):
+                    break
             return 1 if best_gain == 0 else ((len(uncovered) + best_gain - 1) // best_gain)
 
         def _pick_uncovered_with_smallest_branch(uncovered: Set[int]) -> int:
@@ -452,29 +434,28 @@ class LogicLearner(object):
                 if deg < best_deg:
                     best_deg, best_i = deg, i
             return best_i
-        
 
-        # Run one search with a suppression set
         def run_search(suppressed: Set[VariableType]):
-            # log.info(f"Searching with surpressed vtypes:\n{suppressed}...")
             allowed_predicates = set(
                 p for p in idx_by_pred
                 if all(self.vtypes[str(v)] not in suppressed for v in p.expr.free_symbols)
             )
 
             solutions_this_run: List[frozenset[Constraint]] = []
-
-            stack = [(set(), set(), FULL, None, 0)]
+            stack = [(set(), set(), FULL, set(), None, 0)]  
+            # frame: (chosen, covered, uncovered, chosen_vars, candidates, next_idx)
 
             start_time = perf_counter()
             last_solution_time = perf_counter()
+
             while stack:
                 if perf_counter() - start_time > cfg.TIMEOUT_SEC:
                     log.warning(f"Learning timed out after {cfg.TIMEOUT_SEC//60}min.")
                     break
-                
-                chosen, covered, uncovered, candidates, next_idx = stack.pop()
-                #& Fully covered
+
+                chosen, covered, uncovered, chosen_vars, candidates, next_idx = stack.pop()
+
+                # fully covered
                 if not uncovered:
                     fc = frozenset(chosen)
                     if not _dominated_by_existing(fc):
@@ -496,64 +477,59 @@ class LogicLearner(object):
                             last_solution_time = perf_counter()
                             progress.update(1)
                             if max_solutions and len(solutions_this_run) >= max_solutions:
-                                # progress.close()
                                 return
                     continue
-                
-                #& Timeout: if no new solution in the last Xs, stop
+
+                # stall timeout
                 if perf_counter() - last_solution_time > cfg.STALL_TIMEOUT_SEC:
-                    log.warning(
-                        f"Search with {len(vtypes)-len(suppressed)} vtypes timed out after {cfg.STALL_TIMEOUT_SEC//60}min of no new solutions.")
+                    log.warning(f"Suppression search stalled for {cfg.STALL_TIMEOUT_SEC//60}min. Stopping.")
                     break
-                
-                #& Bound by size
+
                 if max_size is not None and len(chosen) >= max_size:
                     continue
 
-                #& BnB optimistic bound
                 if max_size is not None:
                     lb = _optimistic_lb(uncovered)
                     if len(chosen) + lb > max_size:
                         continue
 
-                #& Load candidates if first time
+                # candidates
                 if candidates is None:
-                    # pivot = _pick_uncovered_with_smallest_branch(uncovered)
                     pivot = _pick_uncovered_with_smallest_unchosen(uncovered, chosen)
-                    candidates = [p for p in E_list[pivot] if p in allowed_predicates]
-                    # sort by coverage gain
+                    candidates = [
+                        p for p in E_list[pivot] if p in allowed_predicates
+                        and not any(str(v) in chosen_vars for v in p.expr.free_symbols)  # disjointness filter
+                    ]
                     candidates = sorted(candidates, key=lambda p: -len((idx_by_pred[p]) & uncovered))
                     next_idx = 0
 
                 if next_idx >= len(candidates):
                     continue
 
-                #* Push frame back
-                stack.append((chosen, covered, uncovered, candidates, next_idx + 1))
+                stack.append((chosen, covered, uncovered, chosen_vars, candidates, next_idx + 1))
 
                 p = candidates[next_idx]
                 if p in chosen:
-                    new_chosen, new_covered = chosen, covered
+                    new_chosen, new_covered, new_vars = chosen, covered, chosen_vars
                 else:
                     new_chosen = set(chosen)
                     new_chosen.add(p)
                     new_covered = covered | idx_by_pred[p]
+                    new_vars = set(chosen_vars) | {str(v) for v in p.expr.free_symbols}
 
                 if _dominated_by_existing(new_chosen):
                     continue
 
                 new_uncovered = uncovered - idx_by_pred[p]
-                stack.append((new_chosen, new_covered, new_uncovered, None, 0))
-
-            return
+                stack.append((new_chosen, new_covered, new_uncovered, new_vars, None, 0))
 
         progress = tqdm(desc=f"... Enumerating hitting sets (max_size={max_size})",
                         unit=" sets", total=max_solutions*len(suppression_combos))
-        # Run searches for all suppression combos
+
         for suppressed in suppression_combos:
             run_search(suppressed)
-        progress.close()
 
+        progress.close()
         return [set(s) for s in global_solutions]
 
     def enumerate_minimal_hitting_sets_stack(

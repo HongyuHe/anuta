@@ -455,60 +455,47 @@ class Theory(object):
             
         # #* Convert to implications
         # converted = []
+        # # Step 1: Convert OR-clauses into implications
         # for expr in rules:
         #     if isinstance(expr, sp.Or):
-        #         # Extract the first term and the rest of the terms
-        #         antecedent = sp.Not(expr.args[0])
-        #         consequent = sp.Or(*expr.args[1:])
+        #         # Try to find a negation clause inside the disjunction
+        #         negated_term = None
+        #         for arg in expr.args:
+        #             if isinstance(arg, sp.Not):
+        #                 negated_term = arg
+        #                 break
                 
-        #         # Create the implication
+        #         if negated_term is not None:
+        #             # antecedent = positive form of the negated term
+        #             antecedent = negated_term.args[0]
+        #             # consequent = OR of everything else
+        #             consequent = sp.Or(*[a for a in expr.args if a != negated_term])
+        #         else:
+        #             # default: negate the first term as antecedent
+        #             antecedent = sp.Not(expr.args[0])
+        #             consequent = sp.Or(*expr.args[1:])
+                
         #         converted.append(sp.Implies(antecedent, consequent))
         #     else:
         #         converted.append(expr)
-        # rules = converted
 
-        converted = []
-        # Step 1: Convert OR-clauses into implications
-        for expr in rules:
-            if isinstance(expr, sp.Or):
-                # Try to find a negation clause inside the disjunction
-                negated_term = None
-                for arg in expr.args:
-                    if isinstance(arg, sp.Not):
-                        negated_term = arg
-                        break
-                
-                if negated_term is not None:
-                    # antecedent = positive form of the negated term
-                    antecedent = negated_term.args[0]
-                    # consequent = OR of everything else
-                    consequent = sp.Or(*[a for a in expr.args if a != negated_term])
-                else:
-                    # default: negate the first term as antecedent
-                    antecedent = sp.Not(expr.args[0])
-                    consequent = sp.Or(*expr.args[1:])
-                
-                converted.append(sp.Implies(antecedent, consequent))
-            else:
-                converted.append(expr)
+        # # Step 2: Combine rules with the same antecedent
+        # antecedent_to_consequents = defaultdict(list)
+        # for impl in converted:
+        #     if isinstance(impl, sp.Implies):
+        #         antecedent_to_consequents[impl.args[0]].append(impl.args[1])
+        #     else:
+        #         # keep non-implication rules as-is
+        #         antecedent_to_consequents[impl].append(True)
 
-        # Step 2: Combine rules with the same antecedent
-        antecedent_to_consequents = defaultdict(list)
-        for impl in converted:
-            if isinstance(impl, sp.Implies):
-                antecedent_to_consequents[impl.args[0]].append(impl.args[1])
-            else:
-                # keep non-implication rules as-is
-                antecedent_to_consequents[impl].append(True)
-
-        combined = []
-        for antecedent, consequents in antecedent_to_consequents.items():
-            if consequents == [True]:  # passthrough for non-implications
-                combined.append(antecedent)
-            else:
-                combined_consequent = sp.And(*consequents)
-                combined.append(sp.Implies(antecedent, combined_consequent))
-        rules = combined
+        # combined = []
+        # for antecedent, consequents in antecedent_to_consequents.items():
+        #     if consequents == [True]:  # passthrough for non-implications
+        #         combined.append(antecedent)
+        #     else:
+        #         combined_consequent = sp.And(*consequents)
+        #         combined.append(sp.Implies(antecedent, combined_consequent))
+        # rules = combined
         
         #* CIDDs specific conversions.
         def _interpret_netflow(varname, varval):
