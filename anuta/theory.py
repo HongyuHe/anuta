@@ -478,6 +478,7 @@ class Theory(object):
         #         converted.append(sp.Implies(antecedent, consequent))
         #     else:
         #         converted.append(expr)
+        # rules = converted
 
         # # Step 2: Combine rules with the same antecedent
         # antecedent_to_consequents = defaultdict(list)

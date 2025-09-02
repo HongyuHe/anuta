@@ -528,6 +528,9 @@ class Mawi(Constructor):
         self.df.drop(columns=['FrameTimeEpoch_1', 'FrameTimeEpoch_2', 'FrameTimeEpoch_3'], inplace=True)
         self.df = self.df.astype(int)
         
+        # self.df.to_csv('./data/mawi_learn.csv', index=False)
+        # exit(0)
+        
         variables = list(self.df.columns)
             
         #TODO: Improve
@@ -577,11 +580,11 @@ class Mawi(Constructor):
                     )
                 )
             if 'interarrival' in name.lower():
-                quartiles = get_quartiles(self.df[name])
+                quantiles = get_quantiles(self.df[name])
                 multiconstants.append(
                     (name, Constants(
                         kind=ConstantType.LIMIT,
-                        values=quartiles[1:])) #* Exclude the max value.
+                        values=quantiles)) #* Exclude the max value.
                 )
                 top_values = self.df[name].value_counts().nlargest(TOP_K).index.tolist()
                 multiconstants.append(
@@ -678,6 +681,9 @@ class Netflix(Constructor):
         self.df.drop(columns=['FrameTimeEpoch_1', 'FrameTimeEpoch_2', 'FrameTimeEpoch_3'], inplace=True)
         self.df = self.df.astype(int)
         
+        # self.df.to_csv('data/netflix_learn.csv', index=False)
+        # exit(0)
+        
         variables = list(self.df.columns)
         # self.categoricals = []
         # for name in self.df.columns:
@@ -731,11 +737,11 @@ class Netflix(Constructor):
                     )
                 )
             if 'interarrival' in name.lower():
-                quartiles = get_quartiles(self.df[name])
+                quantiles = get_quantiles(self.df[name])
                 multiconstants.append(
                     (name, Constants(
                         kind=ConstantType.LIMIT,
-                        values=quartiles[1:])) #* Exclude the max value.
+                        values=quantiles)) #* Exclude the max value.
                 )
                 top_values = self.df[name].value_counts().nlargest(TOP_K).index.tolist()
                 multiconstants.append(
@@ -882,7 +888,7 @@ class Cidds001(Constructor):
                 multiconstants.append(
                     (name, Constants(kind=ConstantType.SCALAR, values=sorted(cidds_constants['bytes'])))
                 )
-                quatiles = get_quartiles(self.df[name])
+                quatiles = get_quantiles(self.df[name])
                 multiconstants.append(
                     (name, Constants(kind=ConstantType.LIMIT, values=quatiles[1:])) #* Exclude the max value.
                 )
@@ -1007,19 +1013,23 @@ class Millisampler(Constructor):
         TOP_K = 6
         for var in variables:
             if 'Agg' in var:
+                quantiles = get_quantiles(self.df[var])
                 self.multiconstants.append(
                     (var, Constants(kind=ConstantType.LIMIT, values=[0]))
                 )
-                top_values = self.df[var].value_counts().nlargest(TOP_K).index.tolist()
                 self.multiconstants.append(
-                    (var, Constants(kind=ConstantType.ASSIGNMENT, values=top_values))
+                    (var, Constants(kind=ConstantType.LIMIT, values=quantiles)) #* Exclude the max value.
                 )
-        self.multiconstants.append(
-            ('IngressBytesAgg', Constants(kind=ConstantType.LIMIT, values=[0, 8, 38983679]))
-        )
-        self.multiconstants.append(
-            ('ConnectionsAgg', Constants(kind=ConstantType.LIMIT, values=[0, 26700]))
-        )
+                # top_values = self.df[var].value_counts().nlargest(TOP_K).index.tolist()
+                # self.multiconstants.append(
+                #     (var, Constants(kind=ConstantType.ASSIGNMENT, values=top_values))
+                # )
+        # self.multiconstants.append(
+        #     ('IngressBytesAgg', Constants(kind=ConstantType.LIMIT, values=[0, 8, 38983679]))
+        # )
+        # self.multiconstants.append(
+        #     ('ConnectionsAgg', Constants(kind=ConstantType.LIMIT, values=[0, 26700]))
+        # )
         
         # pprint(self.multiconstants)
         

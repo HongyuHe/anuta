@@ -58,16 +58,22 @@ for varname in ['FrameLen_1', 'IpLen_1', 'IpVersion_1', 'IpHdrLen_1', 'IpTtl_1',
 #TODO: Add vars from other datasets
 
 
-def get_quartiles(series: pd.Series):
+def get_quantiles(series: pd.Series):
     #* Check int or float
     isint = pd.api.types.is_integer_dtype(series)
     isfloat = pd.api.types.is_float_dtype(series)
     assert isint or isfloat, \
         f"Expected int or float series, got {series.dtype}"
+    
+    # if isint:
+    #     return int(series.quantile(0.95)), int(series.quantile(0.75)), int(series.quantile(0.5)), int(series.quantile(0.25)), int(series.min())
+    # else:
+    #     return series.quantile(0.95), series.quantile(0.75), series.quantile(0.5), series.quantile(0.25), series.min()
+    quantiles = set(series.quantile([0.95, 0.75, 0.5, 0.25, 0.0]))
     if isint:
-        return int(series.max()), int(series.quantile(0.75)), int(series.quantile(0.5)), int(series.quantile(0.25)), int(series.min())
+        return sorted(int(q) for q in quantiles)
     else:
-        return series.max(), series.quantile(0.75), series.quantile(0.5), series.quantile(0.25), series.min()
+        return sorted(float(q) for q in quantiles)
 
 def normalize_pcap_5tuple(row):
     # Sort IP addresses and port numbers to normalize direction
