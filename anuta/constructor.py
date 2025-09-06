@@ -484,6 +484,7 @@ class Mawi(Constructor):
         self.df = pd.read_csv(filepath)
         self.df["frame.time_epoch"] = pd.to_datetime(self.df["frame.time_epoch"], unit="s")
         self.df['tcp.flags'] = self.df['tcp.flags'].fillna(value='0x0').apply(int, base=16)
+        self.df['ip.version'] = self.df['ip.version'].fillna(value=0)
         self.df['ip.version'] = self.df['ip.version'].apply(lambda v: int(v) if ',' not in str(v) else int(v.split(',')[0]))
         self.df = self.df.rename(columns=rename_pcap(self.df.columns))[used_pcap_cols]
 
@@ -509,7 +510,7 @@ class Mawi(Constructor):
             by=["flow_ip_1", "flow_ip_2", "flow_port_1", "flow_port_2", "flow_proto", "frame_time_epoch", "frame_number"]
         )
         df = df_sorted.reset_index(drop=True).drop(columns=flow_keys)
-        df = df.drop(columns=['frame_number', 'protocol', 'tsval', 'tsecr'])
+        df = df.drop(columns=['frame_number', 'protocol'])
 
         col_to_var = {col: to_big_camelcase(col, sep='_') for col in df.columns}
         df.rename(columns=col_to_var, inplace=True)
@@ -521,14 +522,14 @@ class Mawi(Constructor):
         
         self.df = generate_sliding_windows(df, stride=1, window=3)
         
-        self.df['InterArrivalMicro_1'] = ((self.df['FrameTimeEpoch_2'] - self.df['FrameTimeEpoch_1'])
-                                        .dt.total_seconds() * 1e6).clip(lower=0) #* ns -> us
-        self.df['InterArrivalMicro_2'] = ((self.df['FrameTimeEpoch_3'] - self.df['FrameTimeEpoch_2'])
-                                        .dt.total_seconds() * 1e6).clip(lower=0)
+        # self.df['InterArrivalMicro_1'] = ((self.df['FrameTimeEpoch_2'] - self.df['FrameTimeEpoch_1'])
+        #                                 .dt.total_seconds() * 1e6).clip(lower=0) #* ns -> us
+        # self.df['InterArrivalMicro_2'] = ((self.df['FrameTimeEpoch_3'] - self.df['FrameTimeEpoch_2'])
+        #                                 .dt.total_seconds() * 1e6).clip(lower=0)
         self.df.drop(columns=['FrameTimeEpoch_1', 'FrameTimeEpoch_2', 'FrameTimeEpoch_3'], inplace=True)
-        self.df = self.df.astype(int)
+        self.df = self.df.replace([np.inf, -np.inf, np.nan], -1).astype(int)
         
-        # self.df.to_csv('./data/mawi_learn.csv', index=False)
+        # self.df.to_csv('./data/syn/netflix_netdiffusion_syn.csv', index=False)
         # exit(0)
         
         variables = list(self.df.columns)
@@ -632,7 +633,7 @@ class Netflix(Constructor):
         log.info(f"Loading data from {filepath}")
         self.df = pd.read_csv(filepath)
         self.df["frame.time_epoch"] = pd.to_datetime(self.df["frame.time_epoch"], unit="s")
-        self.df['tcp.flags'] = self.df['tcp.flags'].apply(int, base=16)
+        self.df['tcp.flags'] = self.df['tcp.flags'].fillna(value='0x0').apply(int, base=16)
         self.df = self.df.rename(columns=rename_pcap(self.df.columns))[used_pcap_cols]
         self.df['tcp_window_size_scalefactor'] = self.df['tcp_window_size_scalefactor'].fillna(value=1).astype(int)
         
@@ -674,11 +675,12 @@ class Netflix(Constructor):
         self.df = generate_sliding_windows(self.df, stride=STRIDE, window=WINDOW)
         # self.df = self.df[[bool(n) for n in ctgan_discriminator_labels]]
         
-        self.df['InterArrivalMicro_1'] = ((self.df['FrameTimeEpoch_2'] - self.df['FrameTimeEpoch_1'])
-                                        .dt.total_seconds() * 1e6) #* ns -> us
-        self.df['InterArrivalMicro_2'] = ((self.df['FrameTimeEpoch_3'] - self.df['FrameTimeEpoch_2'])
-                                        .dt.total_seconds() * 1e6)
+        # self.df['InterArrivalMicro_1'] = ((self.df['FrameTimeEpoch_2'] - self.df['FrameTimeEpoch_1'])
+        #                                 .dt.total_seconds() * 1e6) #* ns -> us
+        # self.df['InterArrivalMicro_2'] = ((self.df['FrameTimeEpoch_3'] - self.df['FrameTimeEpoch_2'])
+        #                                 .dt.total_seconds() * 1e6)
         self.df.drop(columns=['FrameTimeEpoch_1', 'FrameTimeEpoch_2', 'FrameTimeEpoch_3'], inplace=True)
+        self.df = self.df.replace([np.inf, -np.inf, np.nan], -1).astype(int)
         self.df = self.df.astype(int)
         
         # self.df.to_csv('data/netflix_learn.csv', index=False)

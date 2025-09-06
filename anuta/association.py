@@ -204,8 +204,8 @@ class AssociationRuleLearner:
         assumptions = set()
         for varname, domain in self.domains.items():
             if domain.kind == DomainType.CATEGORICAL and '@' not in varname:
-                # assumptions.add(f"{varname} >= 0")
-                # assumptions.add(f"{varname} <= {max(domain.values)}")
+                assumptions.add(f"{varname} >= 0")
+                assumptions.add(f"{varname} <= {max(domain.values)}")
                 
                 full_domain = set(val for val in range(max(domain.values) + 1))
                 missing_values = full_domain - set(domain.values)

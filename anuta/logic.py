@@ -1215,7 +1215,7 @@ class LogicLearner(object):
                     self.examples[predicate] = predicate_values
                     predicates.add(predicate)
         #^ End for j, lhs in enumerate(self.variables)
-        
+        prior_rules = set()
         '''Add domain constraints to prior rules.'''
         self.examples = self.examples[self.variables]
         #* First drop identifiers
@@ -1277,15 +1277,17 @@ class LogicLearner(object):
                 p = Constraint(sp.sympify(p))
                 constraint_predicates.add(p)
         
-        #* Save predicates to file for inspection.
-        # pprint(prior_rules)
-        Theory.save_constraints(constraint_predicates, f'predicates_{self.dataset}_new.pl')
-        exit(0)
+        # #* Save predicates to file for inspection.
+        # # pprint(prior_rules)
+        # Theory.save_constraints(constraint_predicates, f'predicates_{self.dataset}_new.pl')
+        # exit(0)
         
         log.info(f"Duplicate predicates found: {len(predicates) - len(constraint_predicates)}")
         
         self.prior = {Constraint(sp.sympify(r)) for r in prior_rules
                         if r not in [sp.true, sp.false]}
+        Theory.save_constraints(self.prior, f'prior_{self.dataset}.pl')
+        exit(0)
         
         return constraint_predicates
 
