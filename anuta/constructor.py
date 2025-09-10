@@ -980,6 +980,7 @@ class Cidds001(Constructor):
 
 class Millisampler(Constructor):
     def __init__(self, filepath) -> None:
+        super().__init__()
         self.label = 'metadc'
         log.info(f"Loading data from {filepath}")
         self.df: pd.DataFrame = pd.read_csv(filepath)
@@ -987,53 +988,56 @@ class Millisampler(Constructor):
         for col in self.df.columns:
             if col in todrop:
                 self.df.drop(columns=[col], inplace=True)
+        self.df = self.df.iloc[:, :-50]
         variables = list(self.df.columns)
+        self.colvars = {var: {var} for var in variables}
         #* All variables are numerical, so we don't need to specify categoricals.
         self.categoricals = []
-        self.feature_marker = 'Agg'
+        self.feature_marker = 'Ctx'
         
-        todrop = [col for col in self.df.columns if self.feature_marker not in col]
-        self.df.drop(columns=todrop, inplace=True)
+        # #! Remove fine-grained measurements for now.
+        # todrop = [col for col in self.df.columns if self.feature_marker not in col]
+        # self.df.drop(columns=todrop, inplace=True)
         
         self.constants: dict[str, Constants] = {}
-        for var in variables:
-            if 'Agg' in var:
-                self.constants[var] = Constants(
-                    kind=ConstantType.LIMIT,
-                    values=[0] #* Compare these variables to zero (>0)
-                )
-        self.constants['IngressBytesAgg'] = Constants(
-            kind=ConstantType.LIMIT,
-            values=[0, 8, 38983679]
-        )
-        self.constants['ConnectionsAgg'] = Constants(
-            kind=ConstantType.LIMIT,
-            values=[0, 26700]
-        )
+        # for var in variables:
+        #     if 'Agg' in var:
+        #         self.constants[var] = Constants(
+        #             kind=ConstantType.LIMIT,
+        #             values=[0] #* Compare these variables to zero (>0)
+        #         )
+        # self.constants['IngressBytesAgg'] = Constants(
+        #     kind=ConstantType.LIMIT,
+        #     values=[0, 8, 38983679]
+        # )
+        # self.constants['ConnectionsAgg'] = Constants(
+        #     kind=ConstantType.LIMIT,
+        #     values=[0, 26700]
+        # )
         
         self.multiconstants: List[Tuple[str, Constants]] = []
-        TOP_K = 6
-        for var in variables:
-            if 'Agg' in var:
-                quantiles = get_quantiles(self.df[var])
-                self.multiconstants.append(
-                    (var, Constants(kind=ConstantType.LIMIT, values=[0]))
-                )
-                self.multiconstants.append(
-                    (var, Constants(kind=ConstantType.LIMIT, values=quantiles)) #* Exclude the max value.
-                )
-                # top_values = self.df[var].value_counts().nlargest(TOP_K).index.tolist()
-                # self.multiconstants.append(
-                #     (var, Constants(kind=ConstantType.ASSIGNMENT, values=top_values))
-                # )
-        # self.multiconstants.append(
-        #     ('IngressBytesAgg', Constants(kind=ConstantType.LIMIT, values=[0, 8, 38983679]))
-        # )
-        # self.multiconstants.append(
-        #     ('ConnectionsAgg', Constants(kind=ConstantType.LIMIT, values=[0, 26700]))
-        # )
+        # TOP_K = 6
+        # for var in variables:
+        #     if 'Agg' in var:
+        #         quantiles = get_quantiles(self.df[var])
+        #         self.multiconstants.append(
+        #             (var, Constants(kind=ConstantType.LIMIT, values=[0]))
+        #         )
+        #         self.multiconstants.append(
+        #             (var, Constants(kind=ConstantType.LIMIT, values=quantiles)) #* Exclude the max value.
+        #         )
+        #         # top_values = self.df[var].value_counts().nlargest(TOP_K).index.tolist()
+        #         # self.multiconstants.append(
+        #         #     (var, Constants(kind=ConstantType.ASSIGNMENT, values=top_values))
+        #         # )
+        # # self.multiconstants.append(
+        # #     ('IngressBytesAgg', Constants(kind=ConstantType.LIMIT, values=[0, 8, 38983679]))
+        # # )
+        # # self.multiconstants.append(
+        # #     ('ConnectionsAgg', Constants(kind=ConstantType.LIMIT, values=[0, 26700]))
+        # # )
         
-        # pprint(self.multiconstants)
+        # # pprint(self.multiconstants)
         
         domains = {}
         for name in self.df.columns:

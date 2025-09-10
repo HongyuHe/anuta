@@ -36,6 +36,8 @@ def get_featuregroups(
     featuregroups = defaultdict(list)
     variables = list(df.columns)
     for target in tqdm(variables, desc="Generating feature groups"):
+        if feature_marker in target:
+            continue
         #* Skip targets with only one unique value
         if df[target].nunique() <= 1:
             continue
@@ -43,11 +45,11 @@ def get_featuregroups(
         features = [v for v in variables if 
                     not (colvars[v] & colvars[target]) and
                     feature_marker in v]
+        #* In any case, include the full feature set.
+        featuregroups[target].append(features)
             
         combo_size = min(FLAGS.config.MAX_COMBO_SIZE, len(features) - 1)
         # log.info(f"Max combo size for {target} is {combo_size}.")
-        #* In any case, include the full feature set.
-        featuregroups[target].append(features)
         if combo_size <= 0:
             # No combinations to generate, skip further processing
             continue 

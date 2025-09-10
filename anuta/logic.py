@@ -1215,7 +1215,7 @@ class LogicLearner(object):
                     self.examples[predicate] = predicate_values
                     predicates.add(predicate)
         #^ End for j, lhs in enumerate(self.variables)
-        prior_rules = set()
+        # prior_rules = set()
         '''Add domain constraints to prior rules.'''
         self.examples = self.examples[self.variables]
         #* First drop identifiers
