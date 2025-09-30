@@ -36,8 +36,8 @@ def get_featuregroups(
     featuregroups = defaultdict(list)
     variables = list(df.columns)
     for target in tqdm(variables, desc="Generating feature groups"):
-        if feature_marker in target:
-            continue
+        # if feature_marker in target:
+        #     continue
         #* Skip targets with only one unique value
         if df[target].nunique() <= 1:
             continue
@@ -185,7 +185,7 @@ class EntropyTreeLearner(TreeLearner):
         # self.target_unclassified_idxset: Dict[str, Set[int]] = {
         #     target: set(range(self.examples.nrows)) for target in self.categoricals}
         self.target_training_frame: Dict[str, h2o.H2OFrame] = {
-            target: self.examples for target in self.categoricals
+            target: self.examples for target in self.variables
         }
         
         # # pprint(self.domains)
@@ -220,7 +220,8 @@ class EntropyTreeLearner(TreeLearner):
                 if target in self.categoricals:
                     params = self.model_configs['classification']
                 else:
-                    if epoch > 0: 
+                    assert '@' not in target, f"Abstract variable {target} cannot be a regression target."
+                    if epoch > 1: 
                         #* No need to train regression trees in more epochs
                         continue
                     params = self.model_configs['regression']

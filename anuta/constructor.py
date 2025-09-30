@@ -522,10 +522,10 @@ class Mawi(Constructor):
         
         self.df = generate_sliding_windows(df, stride=1, window=3)
         
-        # self.df['InterArrivalMicro_1'] = ((self.df['FrameTimeEpoch_2'] - self.df['FrameTimeEpoch_1'])
-        #                                 .dt.total_seconds() * 1e6).clip(lower=0) #* ns -> us
-        # self.df['InterArrivalMicro_2'] = ((self.df['FrameTimeEpoch_3'] - self.df['FrameTimeEpoch_2'])
-        #                                 .dt.total_seconds() * 1e6).clip(lower=0)
+        self.df['InterArrivalMicro_1'] = ((self.df['FrameTimeEpoch_2'] - self.df['FrameTimeEpoch_1'])
+                                        .dt.total_seconds() * 1e6).clip(lower=0) #* ns -> us
+        self.df['InterArrivalMicro_2'] = ((self.df['FrameTimeEpoch_3'] - self.df['FrameTimeEpoch_2'])
+                                        .dt.total_seconds() * 1e6).clip(lower=0)
         self.df.drop(columns=['FrameTimeEpoch_1', 'FrameTimeEpoch_2', 'FrameTimeEpoch_3'], inplace=True)
         self.df = self.df.replace([np.inf, -np.inf, np.nan], -1).astype(int)
         
@@ -595,14 +595,15 @@ class Mawi(Constructor):
                 )
 
         prior_rules = set()
-        # variables, self.categoricals, prior_rules, self.df = self.build_abstract_domain(
-        #     variables, self.constants, self.df)
-        # #! Only consider the categorical variables for now.
-        # self.df = self.df[self.categoricals]
-        # variables = self.categoricals
-        
-        _, grouped_vars = group_variables_by_type_and_domain(variables)
-        self.categoricals = grouped_vars[DomainType.CATEGORICAL]
+        if FLAGS.tree:
+            variables, self.categoricals, prior_rules, self.df = self.build_abstract_domain(
+                variables, self.constants, self.df)
+            #! Only consider the categorical variables after abstract domain construction.
+            self.df = self.df[self.categoricals]
+            variables = self.categoricals
+        else:
+            _, grouped_vars = group_variables_by_type_and_domain(variables)
+            self.categoricals = grouped_vars[DomainType.CATEGORICAL]
         
         domains = {}
         for name in self.df.columns:
@@ -675,10 +676,10 @@ class Netflix(Constructor):
         self.df = generate_sliding_windows(self.df, stride=STRIDE, window=WINDOW)
         # self.df = self.df[[bool(n) for n in ctgan_discriminator_labels]]
         
-        # self.df['InterArrivalMicro_1'] = ((self.df['FrameTimeEpoch_2'] - self.df['FrameTimeEpoch_1'])
-        #                                 .dt.total_seconds() * 1e6) #* ns -> us
-        # self.df['InterArrivalMicro_2'] = ((self.df['FrameTimeEpoch_3'] - self.df['FrameTimeEpoch_2'])
-        #                                 .dt.total_seconds() * 1e6)
+        self.df['InterArrivalMicro_1'] = ((self.df['FrameTimeEpoch_2'] - self.df['FrameTimeEpoch_1'])
+                                        .dt.total_seconds() * 1e6) #* ns -> us
+        self.df['InterArrivalMicro_2'] = ((self.df['FrameTimeEpoch_3'] - self.df['FrameTimeEpoch_2'])
+                                        .dt.total_seconds() * 1e6)
         self.df.drop(columns=['FrameTimeEpoch_1', 'FrameTimeEpoch_2', 'FrameTimeEpoch_3'], inplace=True)
         self.df = self.df.replace([np.inf, -np.inf, np.nan], -1).astype(int)
         self.df = self.df.astype(int)
@@ -753,14 +754,15 @@ class Netflix(Constructor):
                 )
                 
         prior_rules = []
-        # variables, self.categoricals, prior_rules, self.df = self.build_abstract_domain(
-        #     variables, self.constants, self.df)
-        # #! Only consider the categorical variables for now.
-        # self.df = self.df[self.categoricals]
-        # variables = self.categoricals
-        
-        _, grouped_vars = group_variables_by_type_and_domain(variables)
-        self.categoricals = grouped_vars[DomainType.CATEGORICAL]
+        if FLAGS.tree:
+            variables, self.categoricals, prior_rules, self.df = self.build_abstract_domain(
+                variables, self.constants, self.df)
+            #! Only consider the categorical variables for now.
+            self.df = self.df[self.categoricals]
+            variables = self.categoricals
+        else:
+            _, grouped_vars = group_variables_by_type_and_domain(variables)
+            self.categoricals = grouped_vars[DomainType.CATEGORICAL]
         
         domains = {}
         for name in self.df.columns:
@@ -902,11 +904,12 @@ class Cidds001(Constructor):
         # pprint(multiconstants)
         
         prior_rules: Set[str] = set()
-        # variables, self.categoricals, prior_rules, self.df = self.build_abstract_domain(
-        #     variables, self.constants, self.df, drop_identifiers=False)
-        # #! Only consider the categorical variables for now.
-        # self.df = self.df[self.categoricals]
-        # variables = self.categoricals
+        if FLAGS.tree:
+            variables, self.categoricals, prior_rules, self.df = self.build_abstract_domain(
+                variables, self.constants, self.df, drop_identifiers=False)
+            #! Only consider the categorical variables for now.
+            self.df = self.df[self.categoricals]
+            variables = self.categoricals
         
         domains = {}
         for name in self.df.columns:
@@ -1000,44 +1003,42 @@ class Millisampler(Constructor):
         # self.df.drop(columns=todrop, inplace=True)
         
         self.constants: dict[str, Constants] = {}
-        # for var in variables:
-        #     if 'Agg' in var:
-        #         self.constants[var] = Constants(
-        #             kind=ConstantType.LIMIT,
-        #             values=[0] #* Compare these variables to zero (>0)
-        #         )
-        # self.constants['IngressBytesAgg'] = Constants(
-        #     kind=ConstantType.LIMIT,
-        #     values=[0, 8, 38983679]
-        # )
-        # self.constants['ConnectionsAgg'] = Constants(
-        #     kind=ConstantType.LIMIT,
-        #     values=[0, 26700]
-        # )
+        for var in variables:
+            if 'Agg' in var:
+                self.constants[var] = Constants(
+                    kind=ConstantType.LIMIT,
+                    values=[0] #* Compare these variables to zero (>0)
+                )
+        self.constants['IngressBytesAgg'] = Constants(
+            kind=ConstantType.LIMIT,
+            values=[0, 8, 38983679]
+        )
+        self.constants['ConnectionsAgg'] = Constants(
+            kind=ConstantType.LIMIT,
+            values=[0, 26700]
+        )
         
         self.multiconstants: List[Tuple[str, Constants]] = []
-        # TOP_K = 6
-        # for var in variables:
-        #     if 'Agg' in var:
-        #         quantiles = get_quantiles(self.df[var])
-        #         self.multiconstants.append(
-        #             (var, Constants(kind=ConstantType.LIMIT, values=[0]))
-        #         )
-        #         self.multiconstants.append(
-        #             (var, Constants(kind=ConstantType.LIMIT, values=quantiles)) #* Exclude the max value.
-        #         )
-        #         # top_values = self.df[var].value_counts().nlargest(TOP_K).index.tolist()
-        #         # self.multiconstants.append(
-        #         #     (var, Constants(kind=ConstantType.ASSIGNMENT, values=top_values))
-        #         # )
-        # # self.multiconstants.append(
-        # #     ('IngressBytesAgg', Constants(kind=ConstantType.LIMIT, values=[0, 8, 38983679]))
-        # # )
-        # # self.multiconstants.append(
-        # #     ('ConnectionsAgg', Constants(kind=ConstantType.LIMIT, values=[0, 26700]))
-        # # )
-        
-        # # pprint(self.multiconstants)
+        # TOP_K = 10
+        for var in variables:
+            if 'Agg' in var:
+                quantiles = get_quantiles(self.df[var])
+                self.multiconstants.append(
+                    (var, Constants(kind=ConstantType.LIMIT, values=[0]))
+                )
+                self.multiconstants.append(
+                    (var, Constants(kind=ConstantType.LIMIT, values=quantiles)) #* Exclude the max value.
+                )
+                # top_values = self.df[var].value_counts().nlargest(TOP_K).index.tolist()
+                # self.multiconstants.append(
+                #     (var, Constants(kind=ConstantType.ASSIGNMENT, values=top_values))
+                # )
+        # self.multiconstants.append(
+        #     ('IngressBytesAgg', Constants(kind=ConstantType.LIMIT, values=[0, 8, 38983679]))
+        # )
+        # self.multiconstants.append(
+        #     ('ConnectionsAgg', Constants(kind=ConstantType.LIMIT, values=[0, 26700]))
+        # )
         
         domains = {}
         for name in self.df.columns:

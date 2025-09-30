@@ -1286,8 +1286,8 @@ class LogicLearner(object):
         
         self.prior = {Constraint(sp.sympify(r)) for r in prior_rules
                         if r not in [sp.true, sp.false]}
-        Theory.save_constraints(self.prior, f'prior_{self.dataset}.pl')
-        exit(0)
+        # Theory.save_constraints(self.prior, f'prior_{self.dataset}.pl')
+        # exit(0)
         
         return constraint_predicates
 

@@ -1,6 +1,9 @@
 *.DS_Store
 data/Millisampler-data
 *.html
+*.en
+*.clj
+/scripts/laaf/
 
 *.json
 data/*.csv

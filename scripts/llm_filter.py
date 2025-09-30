@@ -39,7 +39,6 @@ client = AzureOpenAI(
     azure_endpoint=sandbox_endpoint,
     api_version=sandbox_api_version
 )
-# client = OpenAI()
 
 # Prepare HTTP headers for direct image/text POST
 headers = {
