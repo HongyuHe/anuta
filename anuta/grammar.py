@@ -71,7 +71,7 @@ class VariableType(Enum):
     TTL = auto()
     AGGREGATE = auto()
     MEASUREMENT = auto()
-    COUNT = auto()
+    CONNECTION = auto()
     INTERARRIVAL = auto()
     UNKNOWN = auto()
 
@@ -91,7 +91,7 @@ TYPE_DOMIAN = {
     VariableType.TTL: DomainType.NUMERICAL,
     VariableType.AGGREGATE: DomainType.NUMERICAL,
     VariableType.MEASUREMENT: DomainType.NUMERICAL,
-    VariableType.COUNT: DomainType.NUMERICAL,
+    VariableType.CONNECTION: DomainType.NUMERICAL,
     VariableType.INTERARRIVAL: DomainType.NUMERICAL,
     VariableType.UNKNOWN: "unknown"
 }
@@ -105,12 +105,12 @@ def get_variable_type(name: str) -> VariableType:
     elif 'ttl' in lname:
         return VariableType.TTL
     elif 'connections' in lname:
-        return VariableType.COUNT
-    elif 'agg' in lname:
-        #* Separate aggregate measurements from raw measurements.
-        return VariableType.AGGREGATE
-    elif any(k in lname for k in ('ingress', 'egress')):
-        return VariableType.MEASUREMENT
+        return VariableType.CONNECTION
+    # elif 'agg' in lname:
+    #     #* Separate aggregate measurements from raw measurements.
+    #     return VariableType.AGGREGATE
+    # elif any(k in lname for k in ('in', 'ingress', 'egress')):
+    #     return VariableType.MEASUREMENT
     elif any(k in lname for k in ('pt', 'port')):
         return VariableType.PORT
     elif any(k in lname for k in ('tcpseq', 'tcpack')):

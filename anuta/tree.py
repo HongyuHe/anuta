@@ -94,7 +94,7 @@ class TreeLearner(object):
             self.num_examples = 'all'
             
         self.dataset = constructor.label
-        supported_datasets = ['cidds', 'yatesbury', 'metadc', 'netflix', 'mawi']
+        supported_datasets = ['cidds', 'yatesbury', 'metadc', 'netflix', 'mawi', 'ana']
         assert self.dataset in supported_datasets, \
             f"Unsupported dataset: {self.dataset}. Supported datasets: {supported_datasets}."
         self.examples = constructor.df.copy()

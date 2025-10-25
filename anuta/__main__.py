@@ -16,7 +16,7 @@ import warnings
 warnings.filterwarnings("ignore")
 
 from anuta.cli import FLAGS; FLAGS(sys.argv)
-from anuta.constructor import Constructor, Millisampler, Cidds001, Netflix, Cicids2017, Yatesbury, Mawi
+from anuta.constructor import Constructor, Millisampler, Cidds001, Netflix, Cicids2017, Yatesbury, Mawi, Analysis
 from anuta.tree import EntropyTreeLearner, XgboostTreeLearner, LightGbmTreeLearner
 from anuta.association import AssociationRuleLearner
 from anuta.theory import Theory
@@ -75,6 +75,8 @@ if __name__ == '__main__':
             constructor = Millisampler(FLAGS.data)
         case 'mawi':
             constructor = Mawi(FLAGS.data)
+        case 'ana':
+            constructor = Analysis(FLAGS.data)
         case _:
             raise ValueError(f"Unknown dataset: {dataset}")
     

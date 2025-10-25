@@ -339,6 +339,44 @@ class Constructor(object):
         
         return new_variables, categoricals, prior_rules, adf
 
+class Analysis(Constructor):
+    def __init__(self, filepath) -> None:
+        super().__init__()
+        self.label = 'ana'
+        log.info(f"Loading data from {filepath}")
+        df = pd.read_csv(filepath)
+        features = df.columns.tolist()
+        num_features = len(features)
+        data = df.values
+        
+        self.df = multiunroll_aggregate(df, WINDOW=300, AGG=50, STRIDE=25)
+        
+        variables = self.df.columns.tolist()
+        constants = {}
+        prior_rules = []
+        if FLAGS.tree:
+            variables, self.categoricals, prior_rules, self.df = self.build_abstract_domain(
+                variables, constants, self.df)
+        else:
+            typed_vars, grouped_vars = group_variables_by_type_and_domain(variables)
+            self.categoricals = grouped_vars[DomainType.CATEGORICAL]
+            # pprint(typed_vars)
+        
+        domains = {}
+        for name in self.df.columns:
+            if name not in self.categoricals:
+                domains[name] = Domain(DomainType.NUMERICAL, 
+                                       Bounds(self.df[name].min().item(), 
+                                              self.df[name].max().item()), 
+                                       None)
+            else:
+                domains[name] = Domain(DomainType.CATEGORICAL, 
+                                       None, 
+                                       self.df[name].unique().tolist())
+        
+        self.anuta = Anuta(variables, domains, constants=constants, 
+                           prior_kb=prior_rules, multiconstants={})
+
 class Yatesbury(Constructor):
     def __init__(self, filepath) -> None:
         super().__init__()

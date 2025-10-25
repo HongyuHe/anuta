@@ -23,7 +23,7 @@ sys.setrecursionlimit(100_000)
 from anuta.grammar import (
     TYPE_DOMIAN, ConstantType, DomainType, VariableType, 
     group_variables_by_type_and_domain, get_variable_type, tautology, contradition)
-from anuta.utils import log
+from anuta.utils import *
 from anuta.theory import Constraint, Theory
 from anuta.constructor import Constructor
 from anuta.cli import FLAGS
@@ -291,6 +291,79 @@ class LogicLearner(object):
         self.categoricals = [] # constructor.categoricals
         self.prior: Set[Constraint] = set()
     
+    def generate_analytical_predicates(self) -> Set[Constraint]:
+        assert self.dataset == 'ana', f"Analytical predicates are only for 'ana' dataset, not {self.dataset}."
+        assert not self.categoricals, "No categorical variables expected in 'ana' dataset."
+        
+        predicate_strs = set()
+        prior_rules = set()
+        #TODO: Add compound variables X-Y, X+Y, ... as lhs.
+        for i, lhs in enumerate(self.variables):
+            for rhs in self.variables[i+1:]:
+                
+                if not is_meaningful_pair(lhs, rhs):
+                    continue
+                
+                #& Equality and Inequality
+                predicate = f"Eq({lhs}, {rhs})"
+                predicate_values = (self.examples[lhs] == self.examples[rhs])
+                if predicate_values.nunique() > 1:
+                    predicate_strs.add(predicate)
+                else:
+                    if predicate_values.iloc[0] == True:
+                        prior_rules.add(predicate)
+                    else:
+                        prior_rules.add(f"Ne({lhs}, {rhs})")
+                
+                #& StrictGreaterThan
+                predicate = f"{lhs} > {rhs}"
+                predicate_values = (self.examples[lhs] > self.examples[rhs])
+                if predicate_values.nunique() > 1:
+                    predicate_strs.add(predicate)
+                else:
+                    if predicate_values.iloc[0] == True:
+                        prior_rules.add(predicate)
+                    else:
+                        prior_rules.add(f"({lhs} <= {rhs})")
+                
+                #& StrictLessThan
+                predicate = f"{lhs} < {rhs}"
+                predicate_values = (self.examples[lhs] < self.examples[rhs])
+                if predicate_values.nunique() > 1:
+                    predicate_strs.add(predicate)
+                else:
+                    if predicate_values.iloc[0] == True:
+                        prior_rules.add(predicate)
+                    else:
+                        prior_rules.add(f"({lhs} >= {rhs})")
+        
+        #& Add variable domain bounds as prior rules.
+        for varname in self.variables:
+            bounds = self.domains[varname].bounds
+            prior_rules.add(f"({varname}>={bounds.lb})")
+            prior_rules.add(f"({varname}<={bounds.ub})")
+        
+        log.info(f"Generated {len(predicate_strs)} analytical predicates.")
+        log.info(f"Generated {len(prior_rules)} prior rules from constant predicates.")
+        
+        constraint_predicates = set()
+        for p in tqdm(predicate_strs, desc="... Converting predicates to constraints"):
+            if p not in [sp.true, sp.false]:
+                p = Constraint(sp.sympify(p))
+                constraint_predicates.add(p)
+        
+        for p in tqdm(prior_rules, desc="... Converting prior rules to constraints"):
+            p = Constraint(sp.sympify(p))
+            self.prior.add(p)
+            
+        #* Save predicates to file for inspection.
+        # pprint(prior_rules)
+        # Theory.save_constraints(constraint_predicates, f'ana_preds_{self.dataset}.pl')
+        # Theory.save_constraints(self.prior, f'ana_priors_{self.dataset}.pl')
+        # exit(0)
+        return constraint_predicates
+                
+    
     def learn_denial(
         self,
         max_predicates: Optional[int] = cfg.MAX_PREDICATES,
@@ -303,21 +376,22 @@ class LogicLearner(object):
         4) Return rules: Or(*[p in cover]) (instead of Denial constraints And(*[¬p in cover])).
         """
         log.info(f"Learning denial constraints: Max {max_predicates} predicates, Max {max_learned_rules} rules.")
-        predicates: Set[Constraint] = self.generate_predicates_and_prior()
-        # evidence_sets: List[frozenset[Constraint]] = []
-        # #* First check if the evidence sets file exists, if so, load it.
-        # evidence_sets_file = f'data/evidence_sets_{self.dataset}_{self.num_examples}.pkl'
-        # if Path(evidence_sets_file).exists():
-        #     log.info(f"Loading evidence sets from {evidence_sets_file}...")
-        #     with open(evidence_sets_file, 'rb') as f:
-        #         evidence_sets = pickle.load(f)
-        #     log.info(f"Loaded {len(evidence_sets)} evidence sets.")
-        # else:
+        # predicates: Set[Constraint] = self.generate_predicates_and_prior()
+        predicates: Set[Constraint] = self.generate_analytical_predicates()
         
-        start = perf_counter()
-        evidence_sets: List[frozenset[Constraint]] = self.build_evidence_set(predicates)
-        end = perf_counter()
-        log.info(f"\nBuilt {len(evidence_sets)} evidence sets in {end - start:.2f} seconds.")
+        evidence_sets: List[frozenset[Constraint]] = []
+        #* First check if the evidence sets file exists, if so, load it.
+        evidence_sets_file = f'data/evidence_sets_{self.dataset}_{self.num_examples}.pkl'
+        if Path(evidence_sets_file).exists():
+            log.info(f"Loading evidence sets from {evidence_sets_file}...")
+            with open(evidence_sets_file, 'rb') as f:
+                evidence_sets = pickle.load(f)
+            log.info(f"Loaded {len(evidence_sets)} evidence sets.")
+        else:
+            start = perf_counter()
+            evidence_sets: List[frozenset[Constraint]] = self.build_evidence_set(predicates)
+            end = perf_counter()
+            log.info(f"\nBuilt {len(evidence_sets)} evidence sets in {end - start:.2f} seconds.")
         
         assert len(evidence_sets) == self.examples.shape[0], \
             f"Evidence sets size {len(evidence_sets)} != the # of examples {self.examples.shape[0]}."    
@@ -1024,7 +1098,7 @@ class LogicLearner(object):
         '''Compound variables'''
         #& X+Y and (some) X*Y of the same type.
         for vtype in vtype2vars:
-            if vtype == VariableType.MEASUREMENT:
+            if vtype in [VariableType.MEASUREMENT, VariableType.AGGREGATE, VariableType.CONNECTION]:
                 #* Skip fine-grained ingress for now (too many combinations).
                 continue
             domaintype = TYPE_DOMIAN[vtype]

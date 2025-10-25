@@ -2,6 +2,7 @@ import logging
 import sys
 from typing import *
 import sympy as sp
+import numpy as np
 import pandas as pd
 from collections import defaultdict
 import z3
@@ -57,6 +58,116 @@ for varname in ['FrameLen_1', 'IpLen_1', 'IpVersion_1', 'IpHdrLen_1', 'IpTtl_1',
     z3evalmap[varname] = z3.Int(varname)  #* For Netflix dataset, all variables are integers
 #TODO: Add vars from other datasets
 
+
+import re
+
+def split_feature(f):
+    """
+    Split feature name like 'Agg50P99InCongestionBytes'
+    into ('Agg50', 'P99', 'InCongestionBytes').
+    Works for all Agg50*/Win300* features.
+    """
+    m = re.match(r"^(Agg\d+|Win\d+)([A-Za-z0-9]+?)([A-Z].+)$", f)
+    if not m:
+        raise ValueError(f"Unrecognized feature format: {f}")
+    scope, stat, metric = m.groups()
+    return scope, stat, metric
+
+def is_meaningful_pair(var1, var2):
+    scope1, stat1, metric1 = split_feature(var1)
+    scope2, stat2, metric2 = split_feature(var2)
+
+    # Rule 1: metrics must be comparable
+    same_metric_group = (
+        ("Bytes" in metric1 and "Bytes" in metric2)
+        or (metric1 == "Connections" and metric2 == "Connections")
+    )
+
+    # Rule 2: disallow comparing quantiles within same scope+metric
+    # same_scope_metric = (scope1 == scope2 and metric1 == metric2)
+    # quantile_stats = {"P25", "P50", "P90", "P99"}
+    # if same_scope_metric and stat1 in quantile_stats and stat2 in quantile_stats:
+    #     return False
+
+    # Rule 3: disallow unrelated metrics
+    if not same_metric_group:
+        return False
+
+    # # Rule 4: allow only specific cross-scope or cross-stat combinations
+    # if scope1 == scope2 and metric1 == metric2:
+    #     return False  # identical dimension
+
+    return True
+
+def multiunroll_aggregate(df, WINDOW=300, AGG=50, STRIDE=25):
+    """
+    Multi-level unrolling:
+      - Non-overlapping outer windows of size WINDOW
+      - Within each window, overlapping aggregations of size AGG with stride STRIDE
+      - Computes aggregate stats per aggregation and per window
+      - Keeps only aggregated and window-level features
+    """
+
+    features = df.columns.tolist()
+    num_features = len(features)
+    data = df.values
+
+    # Ensure total length fits full windows
+    n_full_windows = len(df) // WINDOW
+    data = data[: n_full_windows * WINDOW]
+    windows = data.reshape(n_full_windows, WINDOW, num_features)
+
+    # Prepare output lists
+    all_rows = []
+
+    # Stats to compute
+    percentiles = [25, 50, 90, 99]
+
+    def compute_stats(x, prefix='Agg'):
+        """Compute aggregate stats for a 2D block (L, num_features)."""
+        res = {}
+        size = AGG if prefix=='Agg' else WINDOW
+        for i, f in enumerate(features):
+            arr = x[:, i]
+            res[f"{prefix}{size}Avg{f}"] = arr.mean()
+            res[f"{prefix}{size}Min{f}"] = arr.min()
+            res[f"{prefix}{size}Max{f}"] = arr.max()
+            res[f"{prefix}{size}Total{f}"] = arr.sum()
+            # res[f"{prefix}Variance{f}"] = arr.var()
+            res[f"{prefix}{size}Std{f}"] = arr.std()
+            res[f"{prefix}{size}Range{f}"] = arr.max() - arr.min()
+            if prefix == "Agg":
+                mid = len(arr) // 2
+                first_half_sum = arr[:mid].sum()
+                second_half_sum = arr[mid:].sum()
+                res[f"{prefix}{size}AbsDelta{f}"] = abs(first_half_sum-second_half_sum)
+            for p in percentiles:
+                res[f"{prefix}{size}P{p}{f}"] = np.percentile(arr, p)
+        return res
+
+    for w in range(n_full_windows):
+        window_data = windows[w]
+
+        # Compute window-level aggregates (broadcasted)
+        window_aggs = compute_stats(window_data, 'Win')
+        # window_aggs_df = pd.DataFrame([window_aggs])
+
+        # Compute aggregation chunks within this window
+        n_aggs = 1 + (WINDOW - AGG) // STRIDE
+        for a in range(n_aggs):
+            start = a * STRIDE
+            end = start + AGG
+            chunk = window_data[start:end]
+            chunk_aggs = compute_stats(chunk, 'Agg')
+
+            # Combine chunk-level + window-level features
+            row = {**chunk_aggs, **{key: val for key, val in window_aggs.items()}}
+            all_rows.append(row)
+
+    # Build final DataFrame
+    df_final = pd.DataFrame(all_rows)
+
+    return df_final
 
 def get_quantiles(series: pd.Series):
     #* Check int or float
