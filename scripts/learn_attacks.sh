@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+set -x  # Enable command tracing
 
 # Labels to process
 labels=(norm portScan dos pingScan bruteForce)
@@ -8,7 +9,7 @@ labels=(norm portScan dos pingScan bruteForce)
 PY_CMD="python anuta"
 DATASET="-dataset=cidds"
 LEARN="-learn"
-LIMIT="-limit=1000000"
+LIMIT="-limit=5000000"
 
 LOGDIR="logs"
 mkdir -p "$LOGDIR"
