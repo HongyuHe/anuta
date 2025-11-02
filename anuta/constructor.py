@@ -858,7 +858,8 @@ class CiddsAtk(Constructor):
         self.label = 'cidds'
         log.info(f"Loading data from {filepath}")
         self.df: pd.DataFrame = pd.read_csv(filepath)
-        self.df = self.df.iloc[:, :-4]  #* Remove the last 4 attack label columns.
+        if 'attackType' in self.df.columns:
+            self.df = self.df.iloc[:, :-4]  #* Remove the last 4 attack label columns.
         #* Discard the timestamps for now, and Flows is always 1.
         for col in ['Date first seen', 'Flows']:
             if col in self.df.columns:
