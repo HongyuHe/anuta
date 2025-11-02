@@ -8,6 +8,7 @@ labels=(norm portScan dos pingScan bruteForce)
 PY_CMD="python anuta"
 DATASET="-dataset=cidds"
 LEARN="-learn"
+LIMIT="-limit=1000000"
 
 LOGDIR="logs"
 mkdir -p "$LOGDIR"
@@ -26,7 +27,7 @@ for lbl in "${labels[@]}"; do
     LOGFILE="$LOGDIR/run_${lbl}.log"
 
     # Execute the command
-    $PY_CMD $DATASET -data="$DATAFILE" $LEARN -label="$lbl" 2>&1 | tee "$LOGFILE"
+    $PY_CMD $DATASET -data="$DATAFILE" $LEARN -label="$lbl" $LIMIT 2>&1 | tee "$LOGFILE"
 
     echo "✅ Completed: $lbl (log: $LOGFILE)"
     echo

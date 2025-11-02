@@ -84,7 +84,7 @@ if __name__ == '__main__':
     if FLAGS.limit:
         limit = FLAGS.limit
         limit = int(limit[:-1]) * 1024 if 'k' in limit else int(limit)
-        assert limit <= constructor.df.shape[0], f"Dataset size {constructor.df.size} < {limit=}"
+        # assert limit <= constructor.df.shape[0], f"Dataset size {constructor.df.size} < {limit=}"
     else:
         limit = constructor.df.shape[0]
     

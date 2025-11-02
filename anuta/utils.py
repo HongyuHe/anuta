@@ -182,7 +182,7 @@ def get_quantiles(series: pd.Series, quantiles: List[float] = [0.95, 0.75, 0.5, 
     if isint:
         return sorted(int(q) for q in quantile_values)
     else:
-        return sorted(float(q) for q in quantile_values)
+        return sorted(round(float(q), 3) for q in quantile_values)
 
 def normalize_pcap_5tuple(row):
     # Sort IP addresses and port numbers to normalize direction

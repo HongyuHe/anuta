@@ -881,6 +881,8 @@ class CiddsAtk(Constructor):
         self.categoricals = cidds_categoricals + ['IsBroadcast', 'Tos']
         
         multiconstants: List[Tuple[str, Constants]] = []
+        quantiles = [0.99, 0.95, 0.5]
+        topk = 3
         for name in variables:
             if 'ip' in name.lower():
                 multiconstants.append(
@@ -890,15 +892,28 @@ class CiddsAtk(Constructor):
                 multiconstants.append(
                     (name, Constants(kind=ConstantType.ASSIGNMENT, values=cidds_ports))
                 )
-            if 'packet' in name.lower():
-                quantiles = get_quantiles(self.df[name], [0.99, 0.95, 0.5])
+            if 'duration' in name.lower():
+                quantiles_values = get_quantiles(self.df[name], quantiles)
                 multiconstants.append(
-                    (name, Constants(kind=ConstantType.LIMIT, values=quantiles))
+                    (name, Constants(kind=ConstantType.LIMIT, values=quantiles_values))
+                )
+            if 'packet' in name.lower():
+                quantiles_values = get_quantiles(self.df[name], quantiles)
+                multiconstants.append(
+                    (name, Constants(kind=ConstantType.LIMIT, values=quantiles_values))
+                )
+                top_packets = self.df[name].value_counts().nlargest(topk).index.tolist()
+                multiconstants.append(
+                    (name, Constants(kind=ConstantType.ASSIGNMENT, values=top_packets))
                 )
             if 'bytes' in name.lower():
-                quatiles = get_quantiles(self.df[name], [0.99, 0.95, 0.5])
+                quatiles = get_quantiles(self.df[name], quantiles)
                 multiconstants.append(
                     (name, Constants(kind=ConstantType.LIMIT, values=quatiles))
+                )
+                top_bytes = self.df[name].value_counts().nlargest(topk).index.tolist()
+                multiconstants.append(
+                    (name, Constants(kind=ConstantType.ASSIGNMENT, values=top_bytes))
                 )
             if 'tos' in name.lower():
                 multiconstants.append(
