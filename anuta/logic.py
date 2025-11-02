@@ -299,21 +299,32 @@ class LogicLearner(object):
         prior_rules = set()
         #TODO: Add compound variables X-Y, X+Y, ... as lhs.
         for i, lhs in enumerate(self.variables):
+            #& Compare with 0 as a special case.
+            predicate = f"{lhs} > 0"
+            predicate_values = (self.examples[lhs] > 0)
+            if predicate_values.nunique() > 1:
+                predicate_strs.add(predicate)
+            else:
+                if predicate_values.iloc[0] == True:
+                    prior_rules.add(predicate)
+                else:
+                    prior_rules.add(f"Eq({lhs}, 0)")
+            
             for rhs in self.variables[i+1:]:
                 
                 if not is_meaningful_pair(lhs, rhs):
                     continue
                 
-                #& Equality and Inequality
-                predicate = f"Eq({lhs}, {rhs})"
-                predicate_values = (self.examples[lhs] == self.examples[rhs])
-                if predicate_values.nunique() > 1:
-                    predicate_strs.add(predicate)
-                else:
-                    if predicate_values.iloc[0] == True:
-                        prior_rules.add(predicate)
-                    else:
-                        prior_rules.add(f"Ne({lhs}, {rhs})")
+                # #& Equality and Inequality
+                # predicate = f"Eq({lhs}, {rhs})"
+                # predicate_values = (self.examples[lhs] == self.examples[rhs])
+                # if predicate_values.nunique() > 1:
+                #     predicate_strs.add(predicate)
+                # else:
+                #     if predicate_values.iloc[0] == True:
+                #         prior_rules.add(predicate)
+                #     else:
+                #         prior_rules.add(f"Ne({lhs}, {rhs})")
                 
                 #& StrictGreaterThan
                 predicate = f"{lhs} > {rhs}"
@@ -379,28 +390,28 @@ class LogicLearner(object):
         # predicates: Set[Constraint] = self.generate_predicates_and_prior()
         predicates: Set[Constraint] = self.generate_analytical_predicates()
         
-        evidence_sets: List[frozenset[Constraint]] = []
-        #* First check if the evidence sets file exists, if so, load it.
-        evidence_sets_file = f'data/evidence_sets_{self.dataset}_{self.num_examples}.pkl'
-        if Path(evidence_sets_file).exists():
-            log.info(f"Loading evidence sets from {evidence_sets_file}...")
-            with open(evidence_sets_file, 'rb') as f:
-                evidence_sets = pickle.load(f)
-            log.info(f"Loaded {len(evidence_sets)} evidence sets.")
-        else:
-            start = perf_counter()
-            evidence_sets: List[frozenset[Constraint]] = self.build_evidence_set(predicates)
-            end = perf_counter()
-            log.info(f"\nBuilt {len(evidence_sets)} evidence sets in {end - start:.2f} seconds.")
+        # evidence_sets: List[frozenset[Constraint]] = []
+        # #* First check if the evidence sets file exists, if so, load it.
+        # evidence_sets_file = f'data/evidence_sets_{self.dataset}_{self.num_examples}.pkl'
+        # if Path(evidence_sets_file).exists():
+        #     log.info(f"Loading evidence sets from {evidence_sets_file}...")
+        #     with open(evidence_sets_file, 'rb') as f:
+        #         evidence_sets = pickle.load(f)
+        #     log.info(f"Loaded {len(evidence_sets)} evidence sets.")
+        # else:
+        start = perf_counter()
+        evidence_sets: List[frozenset[Constraint]] = self.build_evidence_set(predicates)
+        end = perf_counter()
+        log.info(f"Obtained {len(evidence_sets)} evidence sets in {end - start:.2f} seconds.\n")
         
         assert len(evidence_sets) == self.examples.shape[0], \
             f"Evidence sets size {len(evidence_sets)} != the # of examples {self.examples.shape[0]}."    
         
         if not evidence_sets:
-            log.warning("No non-empty evidence sets were produced; returning only prior.")
+            log.warning("No evidence sets were produced; returning only prior.")
 
         start = perf_counter()
-        # covers = self.enumerate_minimal_hitting_sets(
+        # covers = self.enumerate_minimal_hitting_sets_stack(
         #     evidence_sets=evidence_sets,
         #     max_size=max_predicates,
         #     max_solutions=max_learned_rules,
@@ -434,7 +445,12 @@ class LogicLearner(object):
         for constraint in self.prior:
             learned_rules.add(constraint.expr)
         log.info(f"Total {len(learned_rules)} rules (including prior).")
-        Theory.save_constraints(learned_rules, f'denial_{self.dataset}_{self.num_examples}_p{max_predicates}.pl')
+        outputf = f"denial_{self.dataset}_{self.num_examples}_p{max_predicates}"
+        if FLAGS.label:
+            outputf += f"_{FLAGS.label}.pl"
+        else:            
+            outputf += ".pl"
+        Theory.save_constraints(learned_rules, outputf)
         return
         
     def enumerate_minimal_hitting_sets_suppression(
@@ -466,12 +482,16 @@ class LogicLearner(object):
 
         # Build idx_by_pred
         idx_by_pred: Dict[Constraint, Set[int]] = defaultdict(set)
+        empty_esets: Set[int] = set()
         for i, E in enumerate(tqdm(evidence_sets, desc="... Indexing predicates in evidence sets")):
+            if not E:
+                empty_esets.add(i)
             for p in E:
                 idx_by_pred[p].add(i)
+        log.warning(f"Found {len(empty_esets)} empty evidence sets out of {len(evidence_sets)}.")
 
         E_list: List[List[Constraint]] = [list(E) for E in evidence_sets]
-        FULL = set(range(len(E_list)))
+        FULL = set(range(len(E_list))) - empty_esets
 
         global_solutions: List[frozenset[Constraint]] = []
 
@@ -502,17 +522,19 @@ class LogicLearner(object):
             return best_i
         
         def _pick_uncovered_with_smallest_unchosen(uncovered: Set[int], chosen: Set[Constraint]) -> int:
-            best_i, best_deg = None, float('inf')
+            best_i, smallest_deg = None, float('inf')
             for i in uncovered:
-                deg = len(evidence_sets[i] - frozenset(chosen))
-                if deg < best_deg:
-                    best_deg, best_i = deg, i
+                degree = len(evidence_sets[i] - frozenset(chosen))
+                assert degree > 0, "Empty evidence set should have been handled."
+                if 0 < degree < smallest_deg:
+                    smallest_deg, best_i = degree, i
+            #! best_i should never be None here
             return best_i
 
         def run_search(suppressed: Set[VariableType]):
             allowed_predicates = set(
                 p for p in idx_by_pred
-                if all(self.vtypes[str(v)] not in suppressed for v in p.expr.free_symbols)
+                # if all(self.vtypes[str(v)] not in suppressed for v in p.expr.free_symbols)
             )
 
             solutions_this_run: List[frozenset[Constraint]] = []
@@ -560,16 +582,20 @@ class LogicLearner(object):
                     break
 
                 if max_size is not None and len(chosen) >= max_size:
+                    # print(f"Skipping: chosen size {len(chosen)} >= max_size {max_size}.")
                     continue
 
                 if max_size is not None:
                     lb = _optimistic_lb(uncovered)
                     if len(chosen) + lb > max_size:
+                        # print(f"Skipping: optimistic LB {lb} + chosen size {len(chosen)} > max_size {max_size}.")
                         continue
 
                 # candidates
                 if candidates is None:
                     pivot = _pick_uncovered_with_smallest_unchosen(uncovered, chosen)
+                    # print(f"Picking uncovered index {pivot} with smallest unchosen degree {len(evidence_sets[pivot] - frozenset(chosen))}.")
+                    # print(f"Choosing from {len(E_list[pivot])} candidates in evidence set {pivot}.")
                     candidates = [
                         p for p in E_list[pivot] if p in allowed_predicates
                         and not any(str(v) in chosen_vars for v in p.expr.free_symbols)  # disjointness filter
@@ -578,6 +604,7 @@ class LogicLearner(object):
                     next_idx = 0
 
                 if next_idx >= len(candidates):
+                    # print(f"Skipping: exhausted candidates (size {len(candidates)}).")
                     continue
 
                 stack.append((chosen, covered, uncovered, chosen_vars, candidates, next_idx + 1))
@@ -592,6 +619,7 @@ class LogicLearner(object):
                     new_vars = set(chosen_vars) | {str(v) for v in p.expr.free_symbols}
 
                 if _dominated_by_existing(new_chosen):
+                    # print("Skipping: dominated by existing global solution.")
                     continue
 
                 new_uncovered = uncovered - idx_by_pred[p]
@@ -619,7 +647,8 @@ class LogicLearner(object):
         if not evidence_sets:
             return []
         
-        surpressed_vtypes = [VariableType.WINDOW, VariableType.SIZE]
+        # surpressed_vtypes = [VariableType.WINDOW, VariableType.SIZE]
+        surpressed_vtypes = []
         allowed_predicates: Set[Constraint] = set()
         # Index: for each predicate, which evidence indices contain it
         idx_by_pred: Dict[Constraint, Set[int]] = defaultdict(set)
@@ -727,7 +756,7 @@ class LogicLearner(object):
                         continue  # drop superset
                     keep.append(s)
                 else:
-                    # commit only if not broken
+                    # Commit only if not broken
                     solutions.clear()
                     solutions.extend(keep)
                     solutions.append(fc)
@@ -957,14 +986,20 @@ class LogicLearner(object):
         
         learned_rules |= self.prior
         log.info(f"Total {len(learned_rules)} rules (including prior).")
-        Theory.save_constraints(learned_rules, f'levelwise_{self.dataset}_{self.num_examples}_e{epoch}.pl')
+        outputf = f"levelwise_{self.dataset}_{self.num_examples}_e{epoch}"
+        if FLAGS.label:
+            outputf += f"_{FLAGS.label}.pl"
+        else:            
+            outputf += ".pl"
+        Theory.save_constraints(learned_rules, outputf)
         return
     
     def build_evidence_set(self, predicates: Set[Constraint], save: bool = True) -> List[Set[Constraint]]:
         # Pre-pack predicates into a list so all workers use same reference
         evidence_sets: List[Set[Constraint]] = []
         #* First check if the evidence sets file exists, if so, load it.
-        evidence_sets_file = f'data/evidence_sets_{self.dataset}_{self.num_examples}.pkl'
+        evidence_sets_file = f'data/evidence_sets_{self.dataset}_{self.num_examples}_{FLAGS.label}.pkl' \
+            if FLAGS.label else  f'data/evidence_sets_{self.dataset}_{self.num_examples}.pkl'
         if Path(evidence_sets_file).exists():
             log.info(f"Loading evidence sets from {evidence_sets_file}...")
             with open(evidence_sets_file, 'rb') as f:
@@ -996,12 +1031,15 @@ class LogicLearner(object):
                 row_dict = row.to_dict()
                 satisfied = set()
                 for p in predicates_list:
-                    try:
-                        if p.expr.subs(row_dict):
-                            satisfied.add(p)
-                    except Exception:
-                        # Any substitution/eval failure = not satisfied
-                        continue
+                    # try:
+                    if p.expr.subs(row_dict):
+                        satisfied.add(p)
+                    # except Exception:
+                    #     # Any substitution/eval failure = not satisfied
+                    #     continue
+                # if not satisfied:
+                #     log.warning(f"Example {row.name} satisfied no predicates.")
+                assert satisfied, f"Example {row.name} satisfied no predicates. Improve predicate space!!!"
                 chunk_results.append(satisfied)
             return chunk_results
 
@@ -1026,9 +1064,9 @@ class LogicLearner(object):
                 for i in tqdm(range(len(results)), desc="... Merging evidence sets"):
                     results[i] = results[i].union(evidence_sets[i])
         if save:
-            with open(f"evidence_sets_{self.dataset}_{self.num_examples}.pkl", 'wb') as f:
+            with open(evidence_sets_file, 'wb') as f:
                 pickle.dump(results, f)
-                log.info(f"Saved evidence sets to 'evidence_sets_{self.dataset}_{self.num_examples}.pkl'.")
+                log.info(f"Saved evidence sets to {evidence_sets_file}.")
 
         return results
 

@@ -35,6 +35,7 @@ flags.DEFINE_boolean("baseline", False, "Use the baseline method Valiant algorit
 #* Use `-nodc` to disable domain counting
 flags.DEFINE_boolean("dc", True, "Enable domain counting")
 flags.DEFINE_integer("cores", None, "Maximum number of cores allowed to use")
+flags.DEFINE_string("label", "", "Label for the experiment (used in naming output files)")
 
 config_flags.DEFINE_config_file("config", default="./configs/default.py")
 # FLAGS(sys.argv)
