@@ -1,5 +1,6 @@
 import logging
 import sys
+import re
 from typing import *
 import sympy as sp
 import numpy as np
@@ -57,9 +58,6 @@ for varname in metadc_ints:
 for varname in ['FrameLen_1', 'IpLen_1', 'IpVersion_1', 'IpHdrLen_1', 'IpTtl_1', 'IpProto_1', 'IpSrc_1', 'IpDst_1', 'TcpSrcport_1', 'TcpDstport_1', 'TcpHdrLen_1', 'TcpLen_1', 'TcpFlags_1', 'TcpSeq_1', 'TcpAck_1', 'TcpUrgentPointer_1', 'TcpWindowSizeValue_1', 'TcpWindowSizeScalefactor_1', 'TcpWindowSize_1', 'Tsval_1', 'Tsecr_1', 'Protocol_1', 'FrameLen_2', 'IpLen_2', 'IpVersion_2', 'IpHdrLen_2', 'IpTtl_2', 'IpProto_2', 'IpSrc_2', 'IpDst_2', 'TcpSrcport_2', 'TcpDstport_2', 'TcpHdrLen_2', 'TcpLen_2', 'TcpFlags_2', 'TcpSeq_2', 'TcpAck_2', 'TcpUrgentPointer_2', 'TcpWindowSizeValue_2', 'TcpWindowSizeScalefactor_2', 'TcpWindowSize_2', 'Tsval_2', 'Tsecr_2', 'Protocol_2', 'FrameLen_3', 'IpLen_3', 'IpVersion_3', 'IpHdrLen_3', 'IpTtl_3', 'IpProto_3', 'IpSrc_3', 'IpDst_3', 'TcpSrcport_3', 'TcpDstport_3', 'TcpHdrLen_3', 'TcpLen_3', 'TcpFlags_3', 'TcpSeq_3', 'TcpAck_3', 'TcpUrgentPointer_3', 'TcpWindowSizeValue_3', 'TcpWindowSizeScalefactor_3', 'TcpWindowSize_3', 'Tsval_3', 'Tsecr_3', 'Protocol_3', 'InterArrivalMicro_1', 'InterArrivalMicro_2']:
     z3evalmap[varname] = z3.Int(varname)  #* For Netflix dataset, all variables are integers
 #TODO: Add vars from other datasets
-
-
-import re
 
 def split_feature(f):
     """
@@ -169,7 +167,7 @@ def multiunroll_aggregate(df, WINDOW=300, AGG=50, STRIDE=25):
 
     return df_final
 
-def get_quantiles(series: pd.Series):
+def get_quantiles(series: pd.Series, quantiles: List[float] = [0.95, 0.75, 0.5, 0.25]) -> List[Union[int, float]]:
     #* Check int or float
     isint = pd.api.types.is_integer_dtype(series)
     isfloat = pd.api.types.is_float_dtype(series)
@@ -180,11 +178,11 @@ def get_quantiles(series: pd.Series):
     #     return int(series.quantile(0.95)), int(series.quantile(0.75)), int(series.quantile(0.5)), int(series.quantile(0.25)), int(series.min())
     # else:
     #     return series.quantile(0.95), series.quantile(0.75), series.quantile(0.5), series.quantile(0.25), series.min()
-    quantiles = set(series.quantile([0.95, 0.75, 0.5, 0.25, 0.0]))
+    quantile_values = set(series.quantile(quantiles))
     if isint:
-        return sorted(int(q) for q in quantiles)
+        return sorted(int(q) for q in quantile_values)
     else:
-        return sorted(float(q) for q in quantiles)
+        return sorted(float(q) for q in quantile_values)
 
 def normalize_pcap_5tuple(row):
     # Sort IP addresses and port numbers to normalize direction

@@ -851,7 +851,81 @@ class Netflix(Constructor):
                     dc = DomainCounter(count=0, frequency=freq)
                     fcount[cat] |= {key: dc} if type(key) == int else {key.item(): dc}
         return indexset, fcount
+    
+class CiddsAtk(Constructor):
+    def __init__(self, filepath) -> None:
+        super().__init__()
+        self.label = 'cidds'
+        log.info(f"Loading data from {filepath}")
+        self.df: pd.DataFrame = pd.read_csv(filepath)
+        self.df = self.df.iloc[:, :-4]  #* Remove the last 4 attack label columns.
+        #* Discard the timestamps for now, and Flows is always 1.
+        for col in ['Date first seen', 'Flows']:
+            if col in self.df.columns:
+                self.df.drop(columns=[col], inplace=True)
+        col_to_var = {col: to_big_camelcase(col) for col in self.df.columns}
+        self.df.rename(columns=col_to_var, inplace=True)
+        variables = list(self.df.columns)
+        self.feature_marker = ''
         
+        #* Convert the Flags and Proto columns to integers        
+        self.df['Flags'] = self.df['Flags'].apply(cidds_flag_map)
+        self.df['Proto'] = self.df['Proto'].apply(proto_map)
+        self.df['IsBroadcast'] = self.df['DstIpAddr'].apply(cidds_isboradcast_map)
+        self.df['SrcIpAddr'] = self.df['SrcIpAddr'].apply(cidds_subnet_map)
+        self.df['DstIpAddr'] = self.df['DstIpAddr'].apply(cidds_subnet_map)
+        self.df['SrcPt'] = self.df['SrcPt'].apply(cidds_port_map)
+        self.df['DstPt'] = self.df['DstPt'].apply(cidds_port_map)
+        self.df['Tos'] = self.df['Tos'].apply(cidds_tos_map)
+        self.categoricals = cidds_categoricals + ['IsBroadcast', 'Tos']
+        
+        multiconstants: List[Tuple[str, Constants]] = []
+        for name in variables:
+            if 'ip' in name.lower():
+                multiconstants.append(
+                    (name, Constants(kind=ConstantType.ASSIGNMENT, values=cidds_subnets))
+                )
+            if 'pt' in name.lower():
+                multiconstants.append(
+                    (name, Constants(kind=ConstantType.ASSIGNMENT, values=cidds_ports))
+                )
+            if 'packet' in name.lower():
+                quantiles = get_quantiles(self.df[name], [0.99, 0.95, 0.5])
+                multiconstants.append(
+                    (name, Constants(kind=ConstantType.LIMIT, values=quantiles))
+                )
+            if 'bytes' in name.lower():
+                quatiles = get_quantiles(self.df[name], [0.99, 0.95, 0.5])
+                multiconstants.append(
+                    (name, Constants(kind=ConstantType.LIMIT, values=quatiles))
+                )
+            if 'tos' in name.lower():
+                multiconstants.append(
+                    (name, Constants(kind=ConstantType.ASSIGNMENT, values=cidds_tos_values))
+                )
+                
+        prior_rules: Set[str] = set()
+        # if FLAGS.tree:
+        #     variables, self.categoricals, prior_rules, self.df = self.build_abstract_domain(
+        #         variables, self.constants, self.df, drop_identifiers=False)
+        #     #! Only consider the categorical variables for now.
+        #     self.df = self.df[self.categoricals]
+        #     variables = self.categoricals
+        
+        domains = {}
+        for name in self.df.columns:
+            if name not in self.categoricals:
+                domains[name] = Domain(DomainType.NUMERICAL, 
+                                      Bounds(self.df[name].min().item(), 
+                                             self.df[name].max().item()), 
+                                      None)
+            else:
+                domains[name] = Domain(DomainType.CATEGORICAL, 
+                                      None, 
+                                      self.df[name].unique())
+
+        self.anuta = Anuta(variables, domains, constants={}, multiconstants=multiconstants, 
+                           prior_kb=prior_rules)
         
 class Cidds001(Constructor):
     def __init__(self, filepath) -> None:

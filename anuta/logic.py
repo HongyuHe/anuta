@@ -387,8 +387,8 @@ class LogicLearner(object):
         4) Return rules: Or(*[p in cover]) (instead of Denial constraints And(*[¬p in cover])).
         """
         log.info(f"Learning denial constraints: Max {max_predicates} predicates, Max {max_learned_rules} rules.")
-        # predicates: Set[Constraint] = self.generate_predicates_and_prior()
-        predicates: Set[Constraint] = self.generate_analytical_predicates()
+        predicates: Set[Constraint] = self.generate_predicates_and_prior()
+        # predicates: Set[Constraint] = self.generate_analytical_predicates()
         
         # evidence_sets: List[frozenset[Constraint]] = []
         # #* First check if the evidence sets file exists, if so, load it.
@@ -1182,13 +1182,14 @@ class LogicLearner(object):
                     for constant in constants.values:
                         predicates.add(f"Eq({lhs}, {constant})")
                         predicates.add(f"Ne({lhs}, {constant})")
-                #& X > c and X ≤ c
+                #& X > c and X < c
+                #* Use strict inequality, the negations will cover the other side.
                 if constants.kind == ConstantType.LIMIT:
                     for constant in constants.values:
                         predicates.add(f"({lhs} > {constant})")
                         if constant != 0:
                             #! Assume no negative values.
-                            predicates.add(f"({lhs} <= {constant})")
+                            predicates.add(f"({lhs} < {constant})")
             if (domaintype_lhs == DomainType.CATEGORICAL
                 and vtype_lhs not in [VariableType.IP, VariableType.PORT]):
                 #* Don't create Eq/Ne predicates for identifiers (IP/PORT).
@@ -1244,7 +1245,7 @@ class LogicLearner(object):
                 vtype_rhs = variable_types[rhs]
                 domaintype_rhs = TYPE_DOMIAN[vtype_rhs]
                 rhs_vars = set()
-                if vtype_lhs != vtype_rhs:
+                if vtype_lhs != vtype_rhs or vtype_lhs == VariableType.UNKNOWN:
                     #* Only consider same type variables in the RHS.
                     continue
 
@@ -1298,7 +1299,8 @@ class LogicLearner(object):
                     predicate = f"Ne({lhs},{rhs})"
                     predicate_values = (self.examples[lhs]!=self.examples[rhs]).astype(int)
                     #* Should have >1 unique value to this point.
-                    assert predicate_values.nunique() > 1
+                    assert predicate_values.nunique() > 1, \
+                        "Ne predicate should have more than one unique value at this point."
                     self.examples[predicate] = predicate_values
                     predicates.add(predicate)
                 
@@ -1317,15 +1319,19 @@ class LogicLearner(object):
                         if predicate_values.iloc[0] == 0:
                             predicate = f"({lhs}<={rhs})"
                         prior_rules.add(predicate)
-                        continue
+                        # continue
                     
-                    #& Comparison predicates: A<=B
-                    predicate = f"({lhs}<={rhs})"
-                    predicate_values = (self.examples[lhs]<=self.examples[rhs]).astype(int)
-                    assert predicate_values.nunique() > 1, \
-                        "Predicate should have >1 unique value to this point."
-                    self.examples[predicate] = predicate_values
-                    predicates.add(predicate)
+                    #& Comparison predicates: A<B
+                    predicate = f"({lhs}<{rhs})"
+                    predicate_values = (self.examples[lhs]<self.examples[rhs]).astype(int)
+                    if predicate_values.nunique() > 1:
+                        self.examples[predicate] = predicate_values
+                        predicates.add(predicate)
+                    else:
+                        if predicate_values.iloc[0] == 0:
+                            predicate = f"({lhs}>={rhs})"
+                        prior_rules.add(predicate)
+                        # continue
         #^ End for j, lhs in enumerate(self.variables)
         # prior_rules = set()
         '''Add domain constraints to prior rules.'''
@@ -1389,16 +1395,14 @@ class LogicLearner(object):
                 p = Constraint(sp.sympify(p))
                 constraint_predicates.add(p)
         
-        # #* Save predicates to file for inspection.
-        # # pprint(prior_rules)
-        # Theory.save_constraints(constraint_predicates, f'predicates_{self.dataset}_new.pl')
-        # exit(0)
-        
         log.info(f"Duplicate predicates found: {len(predicates) - len(constraint_predicates)}")
         
         self.prior = {Constraint(sp.sympify(r)) for r in prior_rules
                         if r not in [sp.true, sp.false]}
-        # Theory.save_constraints(self.prior, f'prior_{self.dataset}.pl')
+        # #* Save predicates to file for inspection.
+        # # pprint(prior_rules)
+        Theory.save_constraints(constraint_predicates, f'predicates_{self.dataset}_{FLAGS.label}.pl')
+        Theory.save_constraints(self.prior, f'prior_{self.dataset}_{FLAGS.label}.pl')
         # exit(0)
         
         return constraint_predicates

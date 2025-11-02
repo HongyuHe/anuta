@@ -16,7 +16,7 @@ import warnings
 warnings.filterwarnings("ignore")
 
 from anuta.cli import FLAGS; FLAGS(sys.argv)
-from anuta.constructor import Constructor, Millisampler, Cidds001, Netflix, Cicids2017, Yatesbury, Mawi, Analysis
+from anuta.constructor import * #Constructor, Millisampler, Cidds001, Netflix, Cicids2017, Yatesbury, Mawi, Analysis
 from anuta.tree import EntropyTreeLearner, XgboostTreeLearner, LightGbmTreeLearner
 from anuta.association import AssociationRuleLearner
 from anuta.theory import Theory
@@ -64,7 +64,8 @@ if __name__ == '__main__':
     dataset = FLAGS.dataset.lower()
     match dataset:
         case 'cidds':
-            constructor = Cidds001(FLAGS.data)
+            # constructor = Cidds001(FLAGS.data)
+            constructor = CiddsAtk(FLAGS.data)
         case 'netflix':
             constructor = Netflix(FLAGS.data)
         case 'cicids':

@@ -1,5 +1,16 @@
 from bidict import bidict
+from scapy.data import IP_PROTOS
+from bidict import bidict
 
+PROTOS = bidict(IP_PROTOS)
+
+def proto_map(proto: str):
+    proto = proto.lower()
+    if len(proto) == 1:
+        proto = 'tcp' if proto == 't' else 'udp' if proto == 'u' else 'icmp' if proto == 'i' else proto
+        assert proto in PROTOS, f"Unknown protocol: {proto}"
+    
+    return PROTOS.inverse[proto]
 
 known_ports = [
     20,   # FTP Data Transfer
@@ -20,7 +31,7 @@ known_ports = [
     995,  # POP3S
     8080 # Alternative HTTP
 ]
-UNINTERESTED_PORT = 60_000  # Default value for unknown ports
+UNKNOWN_PORT = 60_000  # Default value for unknown ports
 
 def tcpflags2hex(dot_flags: str) -> str:
     """
@@ -177,11 +188,12 @@ popular_ports = [
 cidds_categoricals = ['Flags', 'Proto', 'SrcIpAddr', 'DstIpAddr'] + ['SrcPt', 'DstPt']
 cidds_numericals = ['Packets', 'Bytes', 'Duration']
 cidds_ips = ['private_p2p', 'private_broadcast', '0.0.0.0', 'public_p2p', 'dns']
-cidds_ports = [0, 3, 8, 11, 22, 25, 
-               445, 8082, 5353, 8000, 587,
-            #    23, #* Telnet
-            #    8000, #* Seafile Server
-               53, 67, 68, 80, 123, 137, 138, 443, 993, 8080]
+# cidds_ports = [0, 3, 8, 11, 22, 25, 
+#                445, 8082, 5353, 8000, 587,
+#             #    23, #* Telnet
+#             #    8000, #* Seafile Server
+#                53, 67, 68, 80, 123, 137, 138, 443, 993, 8080]
+cidds_ports = [0, 514, 515, 3, 389, 135, 137, 138, 139, 8, 11, 143, 8080, 8082, 20, 21, 22, 23, 25, 161, 548, 37, 554, 43, 49, 179, 53, 1080, 443, 445, 8000, 67, 68, 70, 587, 79, 80, 465, 88, 990, 993, 995, 631, 873, 5353, 110, 111, 119, 123, 636]
 cidds_ints = ['Packets', 'Bytes', 'Flows'] + cidds_categoricals
 cidds_floats = ['Duration']
 
@@ -193,7 +205,7 @@ cidds_flags_conversion = bidict({flag: i for i, flag in enumerate(['noflags', 'h
 cidds_proto_conversion = bidict({proto: i for i, proto in enumerate(['TCP', 'UDP', 'ICMP', 'IGMP'])})
 cidds_port_conversion = bidict({port: port for port in cidds_ports + known_ports})
 
-cidds_port_conversion.inverse[UNINTERESTED_PORT] = 'uninterested'
+cidds_port_conversion.inverse[UNKNOWN_PORT] = 'unknown'
 cidds_conversions = {
     'ip': cidds_ip_conversion,
     'flags': cidds_flags_conversion,
@@ -208,13 +220,64 @@ cidds_constants = {
 
 def cidds_port_map(port):
     if port not in set(cidds_ports) | set(known_ports):
-        return UNINTERESTED_PORT
+        return UNKNOWN_PORT
     else:
         return port
     
 def cidds_proto_map(proto: str):
 	return cidds_proto_conversion[proto]
 
+def cidds_subnet_map(ip: str):
+    if ip == '0.0.0.0':
+        ipnum = 000
+    elif ip == 'DNS':
+        ipnum = 888
+    elif not ip.startswith('192.168.'):
+        #* Public IPs
+        ipnum = 666
+    else:
+        subnet = int(ip.split('.')[-2])
+        assert subnet in [
+            100, #* Servers
+            200, #* Management
+            210, #* Office
+            220, #* Developer
+        ]
+        ipnum = subnet
+    return ipnum
+
+cidds_subnets = [000, 100, 200, 210, 220, 666, 888]
+cidds_tos_values = [0, 8, 48]
+
+def cidds_isboradcast_map(ip: str):
+    if '.255' in ip:
+        return 1
+    else:
+        return 0
+
+def parse_tos(tos_value: int):
+    """
+    Parse an IPv4 ToS (Type of Service) byte into DSCP and ECN values.
+    
+    Args:
+        tos_value (int): The 8-bit ToS value (0–255)
+    
+    Returns:
+        dict: {'tos': value, 'dscp': value, 'ecn': value}
+    """
+    if not (0 <= tos_value <= 255):
+        raise ValueError("ToS must be in range 0–255")
+
+    dscp = tos_value >> 2          # upper 6 bits
+    ecn = tos_value & 0b11         # lower 2 bits
+
+    return {'tos': tos_value, 'dscp': dscp, 'ecn': ecn}
+
+def cidds_tos_map(tos: int):
+    parse_tos(tos)
+    #* Return only the DSCP value, ECN is not used in CIDDS-001.
+    return parse_tos(tos)['dscp']      
+    
 def cidds_ip_map(ip: str):
     if isinstance(ip, int):
         return ip
@@ -238,15 +301,15 @@ def cidds_ip_map(ip: str):
     return cidds_ip_conversion[new_ip]
 
 def cidds_flag_map(flag: str):
-    # return int(tcpflags2hex(flag), 16)
-	#! Don't consider the specific 'Flags' values for now
-    new_flag = ''
-    if flag == '......':
-        new_flag = cidds_flags_conversion.inverse[0]
-    else:
-        new_flag = cidds_flags_conversion.inverse[1]
+    return int(tcpflags2hex(flag), 16)
+	# #! Don't consider the specific 'Flags' values for now
+    # new_flag = ''
+    # if flag == '......':
+    #     new_flag = cidds_flags_conversion.inverse[0]
+    # else:
+    #     new_flag = cidds_flags_conversion.inverse[1]
     
-    return cidds_flags_conversion[new_flag]
+    # return cidds_flags_conversion[new_flag]
 #******************** CIDDS-001 Domain Knowledge ends ********************
 
 pcap_field_translation = {

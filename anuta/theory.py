@@ -162,9 +162,12 @@ class Theory(object):
             pprint(f"Inference time:\t{end-start:.2f} s")
         return result
     
-    def z3proves(self, query, verbose=True) -> ProofResult:
+    def z3proves(self, query, evalmap=None, verbose=True) -> ProofResult:
         """Try to prove the given claim."""
-        query = eval(str(clausify(query)), z3evalmap)
+        if not evalmap:
+            evalmap = z3evalmap
+            
+        query = eval(str(clausify(query)), evalmap)
         if verbose:
             display(query)
             
@@ -511,7 +514,7 @@ class Theory(object):
             elif 'Proto' in varname:
                 value = cidds_proto_conversion.inverse[varval]
             elif 'Pt' in varname:
-                value = 'unknown_port' if varval == UNINTERESTED_PORT else varval
+                value = 'unknown_port' if varval == UNKNOWN_PORT else varval
             else:
                 value = varval
             return value
