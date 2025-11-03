@@ -14,6 +14,7 @@ from tqdm import tqdm
 from rich import print as pprint
 import itertools
 
+from anuta.cli import FLAGS
 from anuta.constructor import Constructor
 from anuta.known import *
 from anuta.utils import log
@@ -107,7 +108,7 @@ class AssociationRuleLearner:
         # pprint(self.learned_rules)
 
     def learn(self, min_threshold=1) -> pd.DataFrame:
-        log.info(f"Learning from {len(self.df)} examples and {self.df.shape[1]} variables with {self.algorithm}.")
+        log.info(f"Learning from {len(self.df)} examples and {self.df.shape[1]} items with {self.algorithm}.")
         method = None
         match self.algorithm:
             case 'apriori':
@@ -202,27 +203,31 @@ class AssociationRuleLearner:
         log.info(f"Rule extraction took {end - start:.2f} seconds.")
         
         assumptions = set()
-        for varname, domain in self.domains.items():
-            if domain.kind == DomainType.CATEGORICAL and '@' not in varname:
-                assumptions.add(f"{varname} >= 0")
-                assumptions.add(f"{varname} <= {max(domain.values)}")
+        # for varname, domain in self.domains.items():
+        #     if domain.kind == DomainType.CATEGORICAL and '@' not in varname:
+        #         assumptions.add(f"{varname} >= 0")
+        #         assumptions.add(f"{varname} <= {max(domain.values)}")
                 
-                full_domain = set(val for val in range(max(domain.values) + 1))
-                missing_values = full_domain - set(domain.values)
-                ne_predicates = []
-                for value in missing_values:
-                    ne_predicates.append(f"Ne({varname},{value})")
-                #* Don't add negative assumptions for port variables.
-                keywords = ['pt', 'port']
-                if ne_predicates and not any(keyword in varname.lower() for keyword in keywords):
-                    assumptions.add(' & '.join(ne_predicates))
-        assumptions = set(assumptions) | set(get_missing_domain_rules(self.df, self.domains))
+        #         full_domain = set(val for val in range(max(domain.values) + 1))
+        #         missing_values = full_domain - set(domain.values)
+        #         ne_predicates = []
+        #         for value in missing_values:
+        #             ne_predicates.append(f"Ne({varname},{value})")
+        #         #* Don't add negative assumptions for port variables.
+        #         keywords = ['pt', 'port']
+        #         if ne_predicates and not any(keyword in varname.lower() for keyword in keywords):
+        #             assumptions.add(' & '.join(ne_predicates))
+        # assumptions = set(assumptions) | set(get_missing_domain_rules(self.df, self.domains))
         
         rules = set(self.learned_rules) | assumptions
         sprules = [sp.sympify(rule) for rule in rules]
         sprules = list(filter(lambda r: r not in (sp.true, sp.false), sprules))
-        Theory.save_constraints(sprules, 
-                                f'{self.algorithm}_{self.dataset}_{self.num_examples}.pl')
+        outputf = f"{self.algorithm}_{self.dataset}_{self.num_examples}"
+        if FLAGS.label:
+            outputf += f"_{FLAGS.label}.pl"
+        else:            
+            outputf += ".pl"
+        Theory.save_constraints(sprules, outputf)
         
         return
     

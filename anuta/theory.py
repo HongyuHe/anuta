@@ -56,7 +56,8 @@ class Constraint(object):
         return self.__repr__()
 
 class Theory(object):
-    def __init__(self, path_to_constraints: str):
+    def __init__(self, path_to_constraints: str, evalmap=z3evalmap):
+        self.evalmap = evalmap
         self.path_to_constraints = path_to_constraints
         self.constraints = self.load_constraints(path_to_constraints)
         # self._theory = self.create(self.constraints, path_to_constraints)
@@ -162,12 +163,9 @@ class Theory(object):
             pprint(f"Inference time:\t{end-start:.2f} s")
         return result
     
-    def z3proves(self, query, evalmap=None, verbose=True) -> ProofResult:
+    def z3proves(self, query, verbose=True) -> ProofResult:
         """Try to prove the given claim."""
-        if not evalmap:
-            evalmap = z3evalmap
-            
-        query = eval(str(clausify(query)), evalmap)
+        query = eval(str(clausify(query)), self.evalmap)
         if verbose:
             display(query)
             
@@ -301,11 +299,9 @@ class Theory(object):
         unsat_core = s.unsat_core()
         return unsat_core
         
-    @staticmethod
-    def z3create(constraints: List[sp.Expr]):
-        evalmap = z3evalmap
+    def z3create(self, constraints: List[sp.Expr]):
         z3rules = [
-            eval(str(sp.sympify(rule)), evalmap) 
+            eval(str(sp.sympify(rule)), self.evalmap) 
             for rule in constraints
         ]
         z3clauses = [z3.simplify(rule) for rule in z3rules]

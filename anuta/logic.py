@@ -1178,7 +1178,7 @@ class LogicLearner(object):
                     #* Find the constants for this variable.
                     continue
                 #& X=c
-                if varname == lhs and constants.kind == ConstantType.ASSIGNMENT:
+                if constants.kind == ConstantType.ASSIGNMENT:
                     for constant in constants.values:
                         predicates.add(f"Eq({lhs}, {constant})")
                         predicates.add(f"Ne({lhs}, {constant})")
@@ -1353,20 +1353,20 @@ class LogicLearner(object):
                 prior_rules.add(f"({varname}>={bounds.lb})")
                 prior_rules.add(f"({varname}<={bounds.ub})")
                 
-                #& Add default predicate X>0 if the domain contains 0 (except for ack and seq which already have >1).
-                if (bounds.lb <= 0 <= bounds.ub 
-                    and bounds.lb != bounds.ub 
-                    and vtype != VariableType.SEQUENCING
-                ):
-                    #* Add X=0 as a default if the domain contains 0.
-                    predicate = f"Eq({varname},0)"
-                    predicate_values = (self.examples[varname]==0).astype(int)
-                    if predicate_values.nunique() > 1:
-                        predicates.add(predicate)
-                    else:
-                        if predicate_values.iloc[0] == 0:
-                            predicate = f"Not({predicate})"
-                        prior_rules.add(predicate)
+                # #& Add default predicate X>0 if the domain contains 0 (except for ack and seq which already have >1).
+                # if (bounds.lb <= 0 <= bounds.ub 
+                #     and bounds.lb != bounds.ub 
+                #     and vtype != VariableType.SEQUENCING
+                # ):
+                #     #* Add X=0 as a default if the domain contains 0.
+                #     predicate = f"Eq({varname},0)"
+                #     predicate_values = (self.examples[varname]==0).astype(int)
+                #     if predicate_values.nunique() > 1:
+                #         predicates.add(predicate)
+                #     else:
+                #         if predicate_values.iloc[0] == 0:
+                #             predicate = f"Not({predicate})"
+                #         prior_rules.add(predicate)
                 
             elif domaintype == DomainType.CATEGORICAL:
                 prior_rules.add(f"{varname}>=0")

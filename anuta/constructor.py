@@ -12,6 +12,7 @@ from anuta.grammar import (
     Bounds, Anuta, Domain, DomainType, ConstantType, Constants, VariableType, 
     TYPE_DOMIAN, group_variables_by_type_and_domain)
 from anuta.known import *
+from anuta.theory import Theory
 from anuta.utils import *
 from anuta.cli import FLAGS
 
@@ -79,7 +80,9 @@ class Constructor(object):
     def build_abstract_domain(
         self, 
         variables: List[str],
-        constants: Dict[str, Constants], 
+        # constants: Dict[str, Constants],
+        domains: Dict[str, Domain],
+        multiconstants: List[Tuple[str, Constants]],
         df: pd.DataFrame,
         drop_identifiers: bool = True
     ) -> tuple[List[str], List[str], Set[str], pd.DataFrame]:
@@ -108,33 +111,24 @@ class Constructor(object):
                 self.colvars[var].add(var)
         
         start = perf_counter()
-        for varname, consts in constants.items():
-            if varname in categoricals:
+        for varname, constants in multiconstants:
+            if varname in self.categoricals:
                 #* Only augment numerical variables with constants.
                 continue
             vtype = variable_types[varname]
             #& X*c 
-            if consts.kind == ConstantType.SCALAR:
-                for const in consts.values:
-                    if const == 1: continue
-                    avar = f"{const}$*${varname}"
+            if constants.kind == ConstantType.SCALAR:
+                for constant in constants.values:
+                    if constant == 1: continue
+                    avar = f"{constant}$*${varname}"
                     avars.add(avar)
                     variable_types[avar] = vtype
-            #& X+c
-            if consts.kind == ConstantType.ADDITION:
-                for const in consts.values:
-                    avar = f"{const}$+${varname}"
+            #& X+c 
+            if constants.kind == ConstantType.ADDITION:
+                for constant in constants.values:
+                    avar = f"{constant}$+${varname}"
                     avars.add(avar)
                     variable_types[avar] = vtype
-                    
-                #* default: X+1
-                avar = f"1$+${varname}"
-                avars.add(avar)
-                variable_types[avar] = vtype
-            #& X>c 
-            if consts.kind == ConstantType.LIMIT:
-                #* Trees are good at this, so we don't augment these variables.
-                pass
             
         #& All pairs of X*Y and X+Y
         for vtype in typed_variables:
@@ -159,42 +153,90 @@ class Constructor(object):
         log.info(f"Created {len(avars)} abstract vars.")
         
         #& Generate augmented predicates
-        #& All pairs of A==B for A, B in avars
-        # new_vars.add('0')
         #! The order is important: raw variables first, then augmented variables.
-        avars: List[str] = variables + list(avars)
+        abstractvars: List[str] = variables + list(avars)
         abstract_predicates = set()
+        
+        #& First, create predicates with constants for raw variables
+        for varname, constants in multiconstants:
+            vtype = variable_types[varname]
+            domaintype = TYPE_DOMIAN[vtype]
+            if constants.kind == ConstantType.LIMIT:
+                for constant in constants.values:
+                    #& X>c 
+                    predicate = f"@({varname}>{constant})@"
+                    if predicate not in adf.columns:
+                        predicate_values = (adf[varname] > constant).astype(int)
+                    else:
+                        log.warning(f"Duplicated {predicate=}.")
+                    if predicate_values.nunique() > 1:
+                        adf[predicate] = predicate_values
+                        abstract_predicates.add(predicate)
+                        categoricals.append(predicate)
+                        self.colvars[predicate].add(varname)
+                    else:
+                        predicate = predicate.replace('@', '')
+                        if predicate_values.iloc[0] == 0:
+                            predicate = f"Not({predicate})"
+                        prior_rules.add(predicate)
+                    # #& X<c
+                    # predicate = f"@({varname}<{constant})@"
+                    # if predicate not in adf.columns:
+                    #     predicate_values = (adf[varname] < constant).astype(int)
+                    # else:
+                    #     log.warning(f"Duplicated {predicate=}.")
+                    # if predicate_values.nunique() > 1:
+                    #     adf[predicate] = predicate_values
+                    #     abstract_predicates.add(predicate)
+                    #     categoricals.append(predicate)
+                    #     self.colvars[predicate].add(varname)
+                    # else:
+                    #     predicate = predicate.replace('@', '')
+                    #     if predicate_values.iloc[0] == 0:
+                    #         predicate = f"Not({predicate})"
+                    #     prior_rules.add(predicate)
+            elif constants.kind == ConstantType.ASSIGNMENT:
+                for constant in constants.values:
+                    #& X=c
+                    predicate = f"@Eq({varname},{constant})@"
+                    if predicate not in adf.columns:
+                        predicate_values = (adf[varname] == constant).astype(int)
+                    else:
+                        log.warning(f"Duplicated {predicate=}.")
+                    if predicate_values.nunique() > 1:
+                        adf[predicate] = predicate_values
+                        abstract_predicates.add(predicate)
+                        categoricals.append(predicate)
+                        self.colvars[predicate].add(varname)
+                    else:
+                        predicate = predicate.replace('@', '')
+                        if predicate_values.iloc[0] == 0:
+                            predicate = f"Ne({varname},{constant})"
+                        prior_rules.add(predicate)
+                    # #& X!=c
+                    # predicate = f"@Ne({varname},{constant})@"
+                    # if predicate not in adf.columns:
+                    #     predicate_values = (adf[varname] != constant).astype(int)
+                    # else:
+                    #     log.warning(f"Duplicated {predicate=}.")
+                    # if predicate_values.nunique() > 1:
+                    #     adf[predicate] = predicate_values
+                    #     abstract_predicates.add(predicate)
+                    #     categoricals.append(predicate)
+                    #     self.colvars[predicate].add(varname)
+                    # else:
+                    #     predicate = predicate.replace('@', '')
+                    #     if predicate_values.iloc[0] == 0:
+                    #         predicate = f"Eq({varname},{constant})"
+                    #     prior_rules.add(predicate)
         
         # for i, var1 in enumerate(avars):
         #! Assumes LHS contains no operators (raw variables).
         for j, var1 in enumerate(variables):
             vtype1 = variable_types[var1]
             domaintype1 = TYPE_DOMIAN[vtype1]
-            if domaintype1 == DomainType.NUMERICAL:
-                #& Comparing with 0 for raw variables: A>0
-                predicate = f"@({var1}>0)@"
-                if predicate not in adf.columns:
-                    predicate_values = (adf[var1] > 0).astype(int)
-                else:
-                    log.warning(f"Duplicated {predicate=}.")
-                if predicate_values.nunique() > 1:
-                    adf[predicate] = predicate_values
-                    abstract_predicates.add(predicate)
-                    categoricals.append(predicate)
-                    self.colvars[predicate].add(var1)
-                else:
-                    predicate = predicate.replace('@', '')
-                    if predicate_values.iloc[0] == 0:
-                        predicate = f"Not({predicate})"
-                    prior_rules.add(predicate)
-                
-                #& Add bounds for raw numerical variables
-                #! This part is duplicated if numerical vars aren't removed.
-                assert var1 in adf.columns, f"Expected {var1} to be in the dataframe."
-                varmin, varmax = adf[var1].min().item(), adf[var1].max().item()
-                prior_rules.add(f"({var1}>={varmin}) & ({var1}<={varmax})")
             
-            for var2 in avars[j+1:]:
+            for var2 in abstractvars[j+1:]:
                 if var1 == var2: continue
                 vtype2 = variable_types[var2]
                 if vtype1 != vtype2:
@@ -207,34 +249,7 @@ class Constructor(object):
                 #! Assuming LHS is a single variable.
                 assert '$' not in var1, f"LHS var {var1} shouldn't be augmented."
                 lhs = var1
-                lhs_vars.add(lhs)
-                # if "$" not in var1:
-                #     lhs = var1
-                #     lhs_vars.add(lhs)
-                # else:
-                #     #* Recover values and operators
-                #     v1, op1, v2 = var1.split('$')
-                #     lhs = f"({v1}{op1}{v2})"
-                #     lhs_vars.add(v2)
-                        
-                #     const = None
-                #     if v1 not in variables:
-                #         #* v1 is a constant
-                #         const = int(v1)
-                #     else:
-                #         lhs_vars.add(v1)
-                    
-                #     if lhs not in adf.columns:
-                #         if op1 == '+':
-                #             adf[lhs] = const+adf[v2] if const else adf[v1]+adf[v2]
-                #         elif op1 == '*':
-                #             adf[lhs] = const*adf[v2] if const else adf[v1]*adf[v2]
-                    # if adf[lhs].nunique() <= 1:
-                    #     #* Skip abstract variables with only one unique value.
-                    #     skipped.add(lhs)
-                    #     #! This's a very strong assumption.
-                    #     # log.info(f"Skipping abstract {lhs=} with only one unique value.")
-                    #     continue                    
+                lhs_vars.add(lhs)                  
                     
                 if "$" not in var2:
                     rhs = var2
@@ -298,26 +313,36 @@ class Constructor(object):
                         log.warning(f"Duplicated {predicate=}.")
                         
                     if predicate_values.nunique() > 1:
-                        #! Omit A>B for now for scalability.
-                        pass
-                        # adf[predicate] = predicate_values
-                        # abstract_predicates.add(predicate)
-                        # categoricals.append(predicate)
-                        # self.colvars[predicate].update(lhs_vars | rhs_vars)
+                        adf[predicate] = predicate_values
+                        abstract_predicates.add(predicate)
+                        categoricals.append(predicate)
+                        self.colvars[predicate].update(lhs_vars | rhs_vars)
                     else:
                         predicate = predicate.replace('@', '')
                         if predicate_values.iloc[0] == 0:
                             predicate = f"Not({predicate})"
                         prior_rules.add(predicate)
                     
-                    # if '+' not in lhs:
-                    #     new_vars.add(f"@({lhs} > 0)")
-                    # if '+' not in rhs:
-                    #     new_vars.add(f"@({rhs} > 0)")
-            print(f"... {i+1}/{len(avars)} avars: {len(abstract_predicates)=}, {len(prior_rules)=}", end='\r')
+                    #& Comparison predicates: A<B
+                    predicate = f"@({lhs}<{rhs})@"
+                    if predicate not in adf.columns:
+                        predicate_values = (adf[lhs] < adf[rhs]).astype(int)
+                    else:
+                        log.warning(f"Duplicated {predicate=}.")
+                        
+                    if predicate_values.nunique() > 1:
+                        adf[predicate] = predicate_values
+                        abstract_predicates.add(predicate)
+                        categoricals.append(predicate)
+                        self.colvars[predicate].update(lhs_vars | rhs_vars)
+                    else:
+                        predicate = predicate.replace('@', '')
+                        if predicate_values.iloc[0] == 0:
+                            predicate = f"Not({predicate})"
+                        prior_rules.add(predicate)
+
+            print(f"... {i+1}/{len(abstractvars)} avars: {len(abstract_predicates)=}, {len(prior_rules)=}", end='\r')
         end = perf_counter()
-        log.info(f"Generated {len(abstract_predicates)} abstract predicates in {end-start:.2f} seconds.")
-        log.info(f"Learned {len(prior_rules)} prior rules.")
         # pprint(abstract_predicates)
         # pprint(prior_rules)
         # print(f"{new_vars=}")
@@ -327,6 +352,7 @@ class Constructor(object):
         # print(f"{len(abstract_predicates)=}")
         # print(f"{len(new_variables)=}")
         
+        '''Drop identifier variables if needed.'''
         adf = adf[new_variables]
         if drop_identifiers:
             identifiers = typed_variables[VariableType.IP]+typed_variables[VariableType.PORT]
@@ -337,6 +363,43 @@ class Constructor(object):
                 if var in categoricals:
                     categoricals.remove(var)
         
+        '''Add domain bounds as prior rules.'''
+        for var in variables:
+            vtype = variable_types[varname]
+            domaintype = TYPE_DOMIAN[vtype]
+            if domaintype == DomainType.NUMERICAL:
+                bounds = domains[varname].bounds
+                prior_rules.add(f"({varname}>={bounds.lb})")
+                prior_rules.add(f"({varname}<={bounds.ub})")
+                
+            elif domaintype == DomainType.CATEGORICAL:
+                prior_rules.add(f"{varname}>=0")
+                prior_rules.add(f"{varname}<={max(domains[varname].values)}")
+                
+                #& Add negative prior for missing values.
+                unique_values = set(df[varname].unique())
+                domain_values = set(domains[varname].values)
+                missing_values = domain_values - unique_values
+                ne_predicates = []
+                for constant in missing_values:
+                    ne_predicates.append(f"Ne({varname},{constant})")
+                #* Don't add negative assumptions for port variables (too many).
+                keywords = ['pt', 'port']
+                if ne_predicates and not any(keyword in varname.lower() for keyword in keywords):
+                    prior_rules.add(' & '.join(ne_predicates))
+        
+        log.info(f"Generated {len(abstract_predicates)} abstract predicates in {end-start:.2f} seconds.")
+        log.info(f"Learned {len(prior_rules)} prior rules.")
+        #* Save abstract predicates strings to file for debugging.
+        with open(f"abstract_predicates_{FLAGS.label}.json", 'w') as f:
+            #* Replace '@' to avoid issues with JSON serialization.
+            json.dump([p.replace('@', '') for p in abstract_predicates], f, indent=0)
+        Theory.save_constraints(prior_rules, f'abstract_prior_{FLAGS.label}.pl')
+        # #* Save the augmented dataframe for debugging.
+        # adf.to_csv(f"abstract_data_{FLAGS.label}.csv", index=False)
+        log.info(f"Augmented data shape: {adf.shape}")
+        # pprint(len(categoricals))
+        # exit(0)
         return new_variables, categoricals, prior_rules, adf
 
 class Analysis(Constructor):
@@ -919,14 +982,6 @@ class CiddsAtk(Constructor):
                 multiconstants.append(
                     (name, Constants(kind=ConstantType.ASSIGNMENT, values=cidds_tos_values))
                 )
-                
-        prior_rules: Set[str] = set()
-        # if FLAGS.tree:
-        #     variables, self.categoricals, prior_rules, self.df = self.build_abstract_domain(
-        #         variables, self.constants, self.df, drop_identifiers=False)
-        #     #! Only consider the categorical variables for now.
-        #     self.df = self.df[self.categoricals]
-        #     variables = self.categoricals
         
         domains = {}
         for name in self.df.columns:
@@ -939,6 +994,15 @@ class CiddsAtk(Constructor):
                 domains[name] = Domain(DomainType.CATEGORICAL, 
                                       None, 
                                       self.df[name].unique())
+        
+                        
+        prior_rules: Set[str] = set()
+        if FLAGS.assoc or FLAGS.tree:
+            variables, self.categoricals, prior_rules, self.df = self.build_abstract_domain(
+                variables, domains, multiconstants, self.df, drop_identifiers=False)
+            #! Only consider the categorical variables when using ARL or trees.
+            self.df = self.df[self.categoricals]
+            variables = self.categoricals
 
         self.anuta = Anuta(variables, domains, constants={}, multiconstants=multiconstants, 
                            prior_kb=prior_rules)
