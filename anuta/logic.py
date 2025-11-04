@@ -628,8 +628,14 @@ class LogicLearner(object):
         progress = tqdm(desc=f"... Enumerating hitting sets (max_size={max_size})",
                         unit=" sets", total=max_solutions*len(suppression_combos))
 
-        for suppressed in suppression_combos:
-            run_search(suppressed)
+        try:
+            for suppressed in suppression_combos:
+                run_search(suppressed)
+        except KeyboardInterrupt:
+            log.warning("\nSearch interrupted by user (Ctrl+C). Returning partial results.")
+        finally:
+            # Ensure the progress bar is always closed
+            progress.close()
 
         progress.close()
         return [set(s) for s in global_solutions]
@@ -1013,7 +1019,7 @@ class LogicLearner(object):
                                         desc="... Collecting existing predicates from evidence sets")]
             missing_predicates = predicates - set().union(*existing_predicates)
             if missing_predicates:
-                log.warning(f"Missing {len(missing_predicates)} predicates in the evidence set.")
+                log.warning(f"Missing {len(missing_predicates)} predicates in the evidence set (usually invalid ones).")
             else:
                 log.info("All predicates already covered in the evidence sets.")
             return evidence_sets
