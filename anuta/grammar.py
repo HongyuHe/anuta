@@ -43,7 +43,8 @@ class Constants(object):
         return f"{self.kind}, {len(self.values)} constants"
 
 class DomainType(Enum):
-    NUMERICAL = auto()
+    INTEGER = auto()
+    REAL = auto()
     CATEGORICAL = auto()
 
 @dataclass
@@ -73,6 +74,7 @@ class VariableType(Enum):
     MEASUREMENT = auto()
     CONNECTION = auto()
     INTERARRIVAL = auto()
+    TOS = auto()
     UNKNOWN = auto()
 
 
@@ -82,17 +84,18 @@ TYPE_DOMIAN = {
     VariableType.PORT: DomainType.CATEGORICAL,
     VariableType.PROTO: DomainType.CATEGORICAL, 
     VariableType.FLAG: DomainType.CATEGORICAL,
-    VariableType.SEQUENCING: DomainType.NUMERICAL,
-    VariableType.SIZE: DomainType.NUMERICAL,
-    # VariableType.HEADER_LENGTH: DomainType.NUMERICAL,
-    VariableType.POINTER: DomainType.NUMERICAL,
-    VariableType.WINDOW: DomainType.NUMERICAL,
-    VariableType.TIME: DomainType.NUMERICAL,
-    VariableType.TTL: DomainType.NUMERICAL,
-    VariableType.AGGREGATE: DomainType.NUMERICAL,
-    VariableType.MEASUREMENT: DomainType.NUMERICAL,
-    VariableType.CONNECTION: DomainType.NUMERICAL,
-    VariableType.INTERARRIVAL: DomainType.NUMERICAL,
+    VariableType.SEQUENCING: DomainType.INTEGER,
+    VariableType.SIZE: DomainType.INTEGER,
+    # VariableType.HEADER_LENGTH: DomainType.NUMERICAL_INTEGER,
+    VariableType.POINTER: DomainType.INTEGER,
+    VariableType.WINDOW: DomainType.INTEGER,
+    VariableType.TIME: DomainType.REAL,
+    VariableType.TTL: DomainType.INTEGER,
+    VariableType.AGGREGATE: DomainType.INTEGER,
+    VariableType.MEASUREMENT: DomainType.INTEGER,
+    VariableType.CONNECTION: DomainType.INTEGER,
+    VariableType.INTERARRIVAL: DomainType.INTEGER,
+    VariableType.TOS: DomainType.CATEGORICAL,
     VariableType.UNKNOWN: "unknown"
 }
 
@@ -126,6 +129,8 @@ def get_variable_type(name: str) -> VariableType:
         return VariableType.WINDOW
     elif 'interarrival' in lname:
         return VariableType.INTERARRIVAL
+    elif 'tos' in lname:
+        return VariableType.TOS
     elif any(k in lname for k in ('tsval', 'tsecr', 'time', 
                                   'duration', 'epoch', 'date')):
         return VariableType.TIME
@@ -781,7 +786,7 @@ class Anuta(object):
                             #! AND for values not in the domain.
                             self.prior.add(Constraint(sp.And(*ne_priors)))
                     case ConstantType.SCALAR:
-                        assert self.domains[name].kind == DomainType.NUMERICAL, (
+                        assert self.domains[name].kind in [DomainType.INTEGER, DomainType.REAL], (
                             f"`SCALAR` constant {self.constants[name]} must be associated with a numerical var.")
                         
                         self.constants[name].values.sort() #* Just in case.
@@ -792,7 +797,7 @@ class Anuta(object):
                         yield lb_constraint
                         yield ub_constraint
                     case ConstantType.LIMIT:
-                        assert self.domains[name].kind == DomainType.NUMERICAL, (
+                        assert self.domains[name].kind in [DomainType.INTEGER, DomainType.REAL], (
                             f"`LIMIT` constant {self.constants[name]} must be associated with a numerical var.")
                         self.constants[name].values.sort() #* Just in case.
                         #? Strict bounds or not?
@@ -808,7 +813,7 @@ class Anuta(object):
                         yield lower_limit
                         yield upper_limit
                     case ConstantType.ADDITION:
-                        assert self.domains[name].kind == DomainType.NUMERICAL, (
+                        assert self.domains[name].kind in [DomainType.INTEGER, DomainType.REAL], (
                             f"`ADDITION` constant {self.constants[name]} must be associated with a numerical var.")
                         # self.constants[name].values.sort() #* Just in case.
                         for const in self.constants[name].values:
@@ -839,7 +844,7 @@ class Anuta(object):
                     # if eq_priors:
                     #     #* Add the prior knowledge (X=1 | X=2 | ...)
                     #     self.prior.add(Constraint(sp.Or(*eq_priors)))
-                elif domain.kind == DomainType.NUMERICAL: 
+                elif domain.kind in [DomainType.INTEGER, DomainType.REAL]: 
                     #* For numerical vars w/o associated constants, use the unary identity (NOP).
                     # identity = Constraint(var)
                     # # identity.rank = -1
@@ -889,7 +894,7 @@ class Anuta(object):
                         yield sp.Eq(var, sp.S(value))
                         #* Var != value
                         yield sp.Ne(var, sp.S(value))
-                if domain.kind == DomainType.NUMERICAL: 
+                if domain.kind in [DomainType.INTEGER, DomainType.REAL]: 
                     #* Omit numerical vars w/o associated constants for now.
                     continue
         
@@ -929,7 +934,7 @@ class Anuta(object):
                 
             elif type(expr_lhs) == sp.Mul:
                 for name, var in self.variables.items():
-                    if self.domains[name].kind == DomainType.NUMERICAL:
+                    if self.domains[name].kind in [DomainType.INTEGER, DomainType.REAL]:
                         #* (Var x const1) >= Var
                         yield expr_lhs >= var
                         #* (Var x const1) <= Var

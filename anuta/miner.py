@@ -65,7 +65,7 @@ def validator(
     rules: List[sp.Expr], 
     label: int=0, 
     save=True
-) -> float:
+) -> Tuple[float, float]:
     start = perf_counter()
     
     #* Prepare arguments for parallel processing
@@ -106,7 +106,9 @@ def validator(
     
     violation_record = Counter(aggregated_violations)
     pprint(violation_record)
-    violation_rate = violation_record[True] / len(aggregated_violations)
+    
+    rule_violation_rate = violation_record[True] / len(aggregated_violations)
+    sample_violation_rate = total_invalid_samples / len(constructor.df)
     
     violated_rules = [rules[i] for i, is_violated in enumerate(aggregated_violations) if is_violated]
     valid_rules = [rules[i] for i, is_violated in enumerate(aggregated_violations) if not is_violated]
@@ -117,11 +119,11 @@ def validator(
         np.save(f"violation_counts_{constructor.label}_{label}.npy", aggregated_counts)   
         np.save(f"sample_violations_{constructor.label}_{label}.npy", sample_violations)     
     
-    log.info(f"Rule violatioin rate: {violation_rate:.3%}")
-    log.info(f"Invalid samples: {total_invalid_samples}/{len(constructor.df)}")
+    log.info(f"Rule violatioin rate: {rule_violation_rate:.3%}")
+    log.info(f"Invalid samples: {sample_violation_rate:.3%}")
     log.info(f"Runtime time: {end-start:.2f}s\n\n")
     
-    return violation_rate, valid_rules
+    return rule_violation_rate, sample_violation_rate
 
 def validate_candidates(
         constructor: Constructor,

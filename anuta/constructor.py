@@ -93,6 +93,7 @@ class Constructor(object):
         typed_variables, grouped_variables = group_variables_by_type_and_domain(variables)
         # pprint(typed_variables)
         # pprint(grouped_variables)
+        # exit(0)
         categoricals = []
         for varname in grouped_variables[DomainType.CATEGORICAL]:
             if df[varname].nunique() > 1:
@@ -133,7 +134,7 @@ class Constructor(object):
         #& All pairs of X*Y and X+Y
         for vtype in typed_variables:
             domaintype = TYPE_DOMIAN[vtype]
-            if domaintype != DomainType.NUMERICAL: 
+            if domaintype not in (DomainType.INTEGER, DomainType.REAL): 
                 #* Only augment numerical vars.
                 continue
             
@@ -204,10 +205,11 @@ class Constructor(object):
                     else:
                         log.warning(f"Duplicated {predicate=}.")
                     if predicate_values.nunique() > 1:
-                        adf[predicate] = predicate_values
-                        abstract_predicates.add(predicate)
-                        categoricals.append(predicate)
-                        self.colvars[predicate].add(varname)
+                        if domaintype != DomainType.CATEGORICAL:
+                            adf[predicate] = predicate_values
+                            abstract_predicates.add(predicate)
+                            categoricals.append(predicate)
+                            self.colvars[predicate].add(varname)
                     else:
                         predicate = predicate.replace('@', '')
                         if predicate_values.iloc[0] == 0:
@@ -304,7 +306,7 @@ class Constructor(object):
                         predicate = f"Ne({lhs},{rhs})"
                     prior_rules.add(predicate)
                 
-                if domaintype1 == DomainType.NUMERICAL:
+                if domaintype1 in [DomainType.INTEGER, DomainType.REAL]:
                     #& Comparison predicates: A>B
                     predicate = f"@({lhs}>{rhs})@"
                     if predicate not in adf.columns:
@@ -364,10 +366,11 @@ class Constructor(object):
                     categoricals.remove(var)
         
         '''Add domain bounds as prior rules.'''
-        for var in variables:
+        for varname in variables:
             vtype = variable_types[varname]
             domaintype = TYPE_DOMIAN[vtype]
-            if domaintype == DomainType.NUMERICAL:
+            # print(f"... Adding domain bounds for {varname} of type {domaintype}")
+            if domaintype in (DomainType.INTEGER, DomainType.REAL):
                 bounds = domains[varname].bounds
                 prior_rules.add(f"({varname}>={bounds.lb})")
                 prior_rules.add(f"({varname}<={bounds.ub})")
@@ -428,10 +431,16 @@ class Analysis(Constructor):
         domains = {}
         for name in self.df.columns:
             if name not in self.categoricals:
-                domains[name] = Domain(DomainType.NUMERICAL, 
-                                       Bounds(self.df[name].min().item(), 
-                                              self.df[name].max().item()), 
-                                       None)
+                if pd.api.types.is_integer_dtype(self.df[name]):
+                    domains[name] = Domain(DomainType.INTEGER,
+                                           Bounds(self.df[name].min().item(),
+                                                  self.df[name].max().item()),
+                                           None)
+                else:
+                    domains[name] = Domain(DomainType.REAL,
+                                           Bounds(self.df[name].min().item(),
+                                                  self.df[name].max().item()),
+                                           None)
             else:
                 domains[name] = Domain(DomainType.CATEGORICAL, 
                                        None, 
@@ -468,10 +477,16 @@ class Yatesbury(Constructor):
         domains = {}
         for name in self.df.columns:
             if name not in self.categoricals:
-                domains[name] = Domain(DomainType.NUMERICAL, 
-                                       Bounds(self.df[name].min().item(), 
-                                              self.df[name].max().item()), 
-                                       None)
+                if pd.api.types.is_integer_dtype(self.df[name]):
+                    domains[name] = Domain(DomainType.INTEGER,
+                                           Bounds(self.df[name].min().item(),
+                                                  self.df[name].max().item()),
+                                           None)
+                else:
+                    domains[name] = Domain(DomainType.REAL,
+                                           Bounds(self.df[name].min().item(),
+                                                  self.df[name].max().item()),
+                                           None)
             else:
                 domains[name] = Domain(DomainType.CATEGORICAL, 
                                        None, 
@@ -506,10 +521,16 @@ class Cicids2017(Constructor):
         domains = {}
         for name in self.df.columns:
             if name not in self.categoricals:
-                domains[name] = Domain(DomainType.NUMERICAL, 
-                                       Bounds(self.df[name].min().item(), 
-                                              self.df[name].max().item()), 
-                                       None)
+                if pd.api.types.is_integer_dtype(self.df[name]):
+                    domains[name] = Domain(DomainType.INTEGER,
+                                           Bounds(self.df[name].min().item(),
+                                                  self.df[name].max().item()),
+                                           None)
+                else:
+                    domains[name] = Domain(DomainType.REAL,
+                                           Bounds(self.df[name].min().item(),
+                                                  self.df[name].max().item()),
+                                           None)
             else:
                 domains[name] = Domain(DomainType.CATEGORICAL, 
                                        None, 
@@ -709,10 +730,16 @@ class Mawi(Constructor):
         domains = {}
         for name in self.df.columns:
             if name not in self.categoricals:
-                domains[name] = Domain(DomainType.NUMERICAL, 
-                                       Bounds(self.df[name].min().item(), 
-                                              self.df[name].max().item()), 
-                                       None)
+                if pd.api.types.is_integer_dtype(self.df[name]):
+                    domains[name] = Domain(DomainType.INTEGER,
+                                           Bounds(self.df[name].min().item(),
+                                                  self.df[name].max().item()),
+                                           None)
+                else:
+                    domains[name] = Domain(DomainType.REAL,
+                                           Bounds(self.df[name].min().item(),
+                                                  self.df[name].max().item()),
+                                           None)
             else:
                 domains[name] = Domain(DomainType.CATEGORICAL, 
                                        None, 
@@ -868,10 +895,14 @@ class Netflix(Constructor):
         domains = {}
         for name in self.df.columns:
             if name not in self.categoricals:
-                domains[name] = Domain(DomainType.NUMERICAL, 
-                                       Bounds(self.df[name].min().item(), 
-                                              self.df[name].max().item()), 
-                                       None)
+                dtype = (DomainType.INTEGER
+                         if pd.api.types.is_integer_dtype(self.df[name])
+                         else DomainType.REAL)
+                domains[name] = Domain(
+                    dtype,
+                    Bounds(self.df[name].min().item(),
+                           self.df[name].max().item()),
+                    None)
             else:
                 domains[name] = Domain(DomainType.CATEGORICAL, 
                                        None, 
@@ -955,6 +986,10 @@ class CiddsAtk(Constructor):
                 multiconstants.append(
                     (name, Constants(kind=ConstantType.ASSIGNMENT, values=cidds_ports))
                 )
+            if 'tos' in name.lower():
+                multiconstants.append(
+                    (name, Constants(kind=ConstantType.ASSIGNMENT, values=cidds_tos_values))
+                )
             if 'duration' in name.lower():
                 quantiles_values = get_quantiles(self.df[name], quantiles)
                 multiconstants.append(
@@ -978,18 +1013,20 @@ class CiddsAtk(Constructor):
                 multiconstants.append(
                     (name, Constants(kind=ConstantType.ASSIGNMENT, values=top_bytes))
                 )
-            if 'tos' in name.lower():
-                multiconstants.append(
-                    (name, Constants(kind=ConstantType.ASSIGNMENT, values=cidds_tos_values))
-                )
         
         domains = {}
         for name in self.df.columns:
             if name not in self.categoricals:
-                domains[name] = Domain(DomainType.NUMERICAL, 
-                                      Bounds(self.df[name].min().item(), 
-                                             self.df[name].max().item()), 
-                                      None)
+                if pd.api.types.is_integer_dtype(self.df[name]):
+                    domains[name] = Domain(DomainType.INTEGER,
+                                           Bounds(self.df[name].min().item(),
+                                                  self.df[name].max().item()),
+                                           None)
+                else:
+                    domains[name] = Domain(DomainType.REAL,
+                                           Bounds(self.df[name].min().item(),
+                                                  self.df[name].max().item()),
+                                           None)
             else:
                 domains[name] = Domain(DomainType.CATEGORICAL, 
                                       None, 
@@ -1000,7 +1037,6 @@ class CiddsAtk(Constructor):
         if FLAGS.assoc or FLAGS.tree:
             variables, self.categoricals, prior_rules, self.df = self.build_abstract_domain(
                 variables, domains, multiconstants, self.df, drop_identifiers=False)
-            #! Only consider the categorical variables when using ARL or trees.
             self.df = self.df[self.categoricals]
             variables = self.categoricals
 
@@ -1106,10 +1142,16 @@ class Cidds001(Constructor):
         domains = {}
         for name in self.df.columns:
             if name not in self.categoricals:
-                domains[name] = Domain(DomainType.NUMERICAL, 
-                                      Bounds(self.df[name].min().item(), 
-                                             self.df[name].max().item()), 
-                                      None)
+                if pd.api.types.is_integer_dtype(self.df[name]):
+                    domains[name] = Domain(DomainType.INTEGER,
+                                           Bounds(self.df[name].min().item(),
+                                                  self.df[name].max().item()),
+                                           None)
+                else:
+                    domains[name] = Domain(DomainType.REAL,
+                                           Bounds(self.df[name].min().item(),
+                                                  self.df[name].max().item()),
+                                           None)
             else:
                 domains[name] = Domain(DomainType.CATEGORICAL, 
                                       None, 
@@ -1234,10 +1276,16 @@ class Millisampler(Constructor):
         
         domains = {}
         for name in self.df.columns:
-            domains[name] = Domain(DomainType.NUMERICAL, 
-                                   Bounds(self.df[name].min().item(), 
-                                          self.df[name].max().item()), 
-                                   None)
+            if pd.api.types.is_integer_dtype(self.df[name]):
+                domains[name] = Domain(DomainType.INTEGER,
+                                       Bounds(self.df[name].min().item(),
+                                              self.df[name].max().item()),
+                                       None)
+            else:
+                domains[name] = Domain(DomainType.REAL,
+                                       Bounds(self.df[name].min().item(),
+                                              self.df[name].max().item()),
+                                       None)
         self.anuta = Anuta(variables, domains, constants=self.constants, multiconstants=self.multiconstants)
         return
 

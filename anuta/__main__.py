@@ -133,16 +133,16 @@ if __name__ == '__main__':
         
         log.info(f"Validating {len(constructor.df)} samples from {FLAGS.data} using {rulepath}")
         
-        violation_rate, _ = validator(constructor, rules, label)
-        violation_record = ','.join([data_label, str(rule_label), str(checked), str(violation_rate)])
+        rule_vio_rate, sample_vio_rate = validator(constructor, rules, label)
+        violation_record = ','.join([data_label, str(rule_label), str(rule_vio_rate), str(sample_vio_rate)])
         #TODO: Specify all file names in the config file.
-        violation_file = f"violation.csv"
+        violation_file = f"violation_records.csv"
         if Path(violation_file).exists():
             with open(violation_file, 'a') as f:
                 f.write(violation_record + '\n')
         else:
             with open(violation_file, 'w') as f:
-                f.write("data,rule,checked,violation_rate\n")
+                f.write("data,rule,rule_violation_rate,sample_violation_rate\n")
                 f.write(violation_record + '\n')
 
     sys.exit(

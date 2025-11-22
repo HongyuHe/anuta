@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-set -x  # Enable command tracing
+# set -x  # Enable command tracing
 
 # Labels to process
 labels=(norm portScan dos pingScan bruteForce)
@@ -28,7 +28,7 @@ for lbl in "${labels[@]}"; do
     LOGFILE="$LOGDIR/run_${lbl}.log"
 
     # Execute the command
-    $PY_CMD $DATASET -data="$DATAFILE" $LEARN -label="$lbl" $LIMIT 2>&1 | tee "$LOGFILE"
+    $PY_CMD $DATASET -data="$DATAFILE" $LEARN -label="$lbl" $LIMIT #2>&1 | tee "$LOGFILE"
 
     echo "✅ Completed: $lbl (log: $LOGFILE)"
     echo

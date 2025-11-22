@@ -42,5 +42,5 @@ setup(
     entry_points={
         # "console_scripts": ["anuta = anuta.__main__:main"]
     },
-    extras_require={"test": read_requirements("requirements_test.txt")},
+    # extras_require={"test": read_requirements("requirements_test.txt")},
 )

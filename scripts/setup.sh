@@ -28,6 +28,7 @@ set -x
     bash scripts/install_java.sh
 
     echo "set -g history-limit 10000000" > ~/.tmux.conf
+    tmux source-file ~/.tmux.conf
 
     exit 0
 }
