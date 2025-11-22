@@ -18,6 +18,7 @@ FLAGS = flags.FLAGS
 #* Commands (avoid using subcommands for simplicity)
 flags.DEFINE_boolean("learn", False, "Learn constraints from a dataset")
 flags.DEFINE_boolean("validate", False, "Validate a dataset using a learned theory")
+flags.DEFINE_boolean("detect", False, "Detect violations using a learned theory")
 
 #* Configs
 flags.DEFINE_enum("logic", 'denial', ['denial', 'level'], "Logic learning method to use")

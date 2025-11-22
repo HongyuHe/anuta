@@ -8,6 +8,7 @@ from typing import *
 import pandas as pd
 import numpy as np
 import sympy as sp
+import z3
 import psutil
 import warnings
 warnings.filterwarnings("ignore")
@@ -15,13 +16,137 @@ warnings.filterwarnings("ignore")
 from anuta.grammar import AnutaMilli, Anuta, DomainType
 from anuta.constructor import Constructor, DomainCounter
 from anuta.theory import Theory, Constraint
-from anuta.utils import log, clausify, save_constraints
+from anuta.utils import log, clausify, save_constraints, z3evalmap
 from anuta.cli import FLAGS
 
 
 anuta : Anuta = None
 # #* Load configurations.
 # cfg = FLAGS.config
+def detector(
+    constructor: Constructor,
+    path_to_rules: str,
+    label: str | int = 0,
+    limit: int = 0,
+    save: bool = True,
+) -> float:
+    df = constructor.df
+    if limit and limit < len(df):
+        df = df.sample(n=limit, random_state=42).reset_index(drop=True)
+    else:
+        df = df.reset_index(drop=True)
+    
+    domain_kinds: Dict[str, DomainType] = {}
+    for varname, domain in constructor.anuta.domains.items():
+        domain_kinds[varname] = domain.kind
+    
+    core_count = psutil.cpu_count() if not FLAGS.cores else FLAGS.cores
+    dfpartitions = [partition.reset_index(drop=True) for partition in np.array_split(df, core_count)]
+    nworkers = core_count if len(df) > core_count else 1
+    
+    log.info(f"Spawning {nworkers} workers for detection ...")
+    if nworkers > 1:
+        args = [(i, partition, path_to_rules, domain_kinds) for i, partition in enumerate(dfpartitions)]
+        pool = Pool(core_count)
+        log.info("Detecting violations in parallel ...")
+        worker_outputs = pool.starmap(detect_partition, args)
+        pool.close()
+    else:
+        worker_outputs = [detect_partition(0, df, path_to_rules, domain_kinds)]
+    
+    sample_partitions, worker_times = zip(*worker_outputs)
+    sample_violations = np.concatenate(sample_partitions)
+    total_invalid = int(sample_violations.sum())
+    sample_violation_rate = (total_invalid / len(df)) if len(df) else 0.0
+    min_runtime = min(worker_times)
+    max_runtime = max(worker_times)
+    
+    log.info(f"Invalid samples detected: {total_invalid}/{len(df)} ({sample_violation_rate:.3%})")
+    log.info(f"Detection worker runtime: {min_runtime:.2f}s (min), {max_runtime:.2f}s (max)\n")
+    
+    if save:
+        np.save(f"detector_sample_violations_{constructor.label}_{label}.npy", sample_violations)
+    
+    return sample_violation_rate
+
+def _coerce_z3_value(varname: str, value: Any, domaintype: DomainType) -> Optional[z3.ExprRef]:
+    if pd.isna(value):
+        log.warning(f"[Detector] Encountered NaN for {varname}; marking sample as violation.")
+        return None
+    if hasattr(value, "item"):
+        value = value.item()
+    try:
+        if domaintype == DomainType.REAL:
+            return z3.RealVal(float(value))
+        if isinstance(value, float):
+            if not float(value).is_integer():
+                log.warning(f"[Detector] Non-integer value {value} for integer var {varname}.")
+                return None
+            value = int(round(value))
+        return z3.IntVal(int(value))
+    except (TypeError, ValueError) as exc:
+        log.warning(f"[Detector] Failed to coerce {varname}={value}: {exc}")
+        return None
+
+def _build_evalmap(domain_kinds: Dict[str, DomainType]) -> Dict[str, Any]:
+    evalmap = z3evalmap.copy()
+    for varname, domaintype in domain_kinds.items():
+        if domaintype == DomainType.REAL:
+            evalmap[varname] = z3.Real(varname)
+        else:
+            evalmap[varname] = z3.Int(varname)
+    return evalmap
+
+def detect_partition(
+    worker_idx: int,
+    dfpartition: pd.DataFrame,
+    rulepath: str,
+    domain_kinds: Dict[str, DomainType],
+) -> Tuple[np.ndarray, float]:
+    print(f"Detector worker {worker_idx+1} started.", end='\r')
+    evalmap = _build_evalmap(domain_kinds)
+    theory = Theory(rulepath, evalmap)
+    worker_start = perf_counter()
+    sample_violations = np.zeros(len(dfpartition), dtype=int)
+    z3varmap = {name: theory.evalmap.get(name) for name in domain_kinds if name in theory.evalmap}
+    
+    for local_idx, (_, sample) in enumerate(tqdm(
+        dfpartition.iterrows(), 
+        total=len(dfpartition),
+        desc=f"Detector worker {worker_idx+1} processing samples"
+    )):
+        assignment: List[Tuple[z3.ExprRef, z3.ExprRef]] = []
+        invalid_assignment = False
+        for varname, value in sample.items():
+            if varname not in z3varmap:
+                continue
+            domaintype = domain_kinds.get(varname, DomainType.INTEGER)
+            z3value = _coerce_z3_value(varname, value, domaintype)
+            if z3value is None:
+                invalid_assignment = True
+                break
+            assignment.append((z3varmap[varname], z3value))
+        
+        if invalid_assignment:
+            sample_violations[local_idx] = 1
+            continue
+        
+        substituted = z3.simplify(z3.substitute(theory._z3theory, assignment))
+        if z3.is_false(substituted):
+            sample_violations[local_idx] = 1
+        elif z3.is_true(substituted):
+            continue
+        else:
+            #* Fallback to solver check
+            solver = z3.Solver()
+            solver.add(substituted)
+            if solver.check() != z3.sat:
+                sample_violations[local_idx] = 1
+    
+    runtime = perf_counter() - worker_start
+    log.info(f"Detector worker {worker_idx+1} finished in {runtime:.2f}s.")
+    return sample_violations, runtime
+    
 
 def validate(
     worker_idx: int, 

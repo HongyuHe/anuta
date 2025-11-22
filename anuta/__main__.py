@@ -20,7 +20,7 @@ from anuta.constructor import * #Constructor, Millisampler, Cidds001, Netflix, C
 from anuta.tree import EntropyTreeLearner, XgboostTreeLearner, LightGbmTreeLearner
 from anuta.association import AssociationRuleLearner
 from anuta.theory import Theory
-from anuta.miner import miner_versionspace, miner_valiant, validator
+from anuta.miner import miner_versionspace, miner_valiant, validator, detector
 from anuta.logic import LogicLearner
 from anuta.utils import log
 
@@ -144,6 +144,28 @@ if __name__ == '__main__':
             with open(violation_file, 'w') as f:
                 f.write("data,rule,rule_violation_rate,sample_violation_rate\n")
                 f.write(violation_record + '\n')
+    elif FLAGS.detect:
+        assert FLAGS.rules, "No rules file provided."
+        rulepath = FLAGS.rules
+        assert rulepath.endswith('.pl'), "Invalid rule file."
+        rule_label = "_".join(rulepath.split('_')[1:])[:-3]
+        label = f"{data_label}-{rule_label}"
+        detector_limit = limit if FLAGS.limit else 0
+        
+        log.info(f"Detecting violations on {FLAGS.data} using {rulepath}")
+        sample_violation_rate = detector(constructor, rulepath, label=label, limit=detector_limit)
+        detection_record = ','.join([data_label, 
+                                     str(rule_label), 
+                                     str(round(sample_violation_rate, 5)), 
+                                     FLAGS.label or label])
+        detection_file = "detection_records.csv"
+        if Path(detection_file).exists():
+            with open(detection_file, 'a') as f:
+                f.write(detection_record + '\n')
+        else:
+            with open(detection_file, 'w') as f:
+                f.write("data,rule,sample_violation_rate,label\n")
+                f.write(detection_record + '\n')
 
     sys.exit(
         pprint("Configurations:", dict(FLAGS.config), sep='\n')
