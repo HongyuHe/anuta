@@ -29,7 +29,7 @@ def detector(
     label: str | int = 0,
     limit: int = 0,
     save: bool = True,
-) -> float:
+) -> Tuple[float, int, float, float]:
     df = constructor.df
     if limit and limit < len(df):
         df = df.sample(n=limit, random_state=42).reset_index(drop=True)
@@ -67,7 +67,7 @@ def detector(
     if save:
         np.save(f"detector_sample_violations_{constructor.label}_{label}.npy", sample_violations)
     
-    return sample_violation_rate
+    return sample_violation_rate, len(df), min_runtime, max_runtime
 
 def _coerce_z3_value(varname: str, value: Any, domaintype: DomainType) -> Optional[z3.ExprRef]:
     if pd.isna(value):

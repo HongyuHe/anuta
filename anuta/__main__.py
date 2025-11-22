@@ -153,18 +153,24 @@ if __name__ == '__main__':
         detector_limit = limit if FLAGS.limit else 0
         
         log.info(f"Detecting violations on {FLAGS.data} using {rulepath}")
-        sample_violation_rate = detector(constructor, rulepath, label=label, limit=detector_limit)
-        detection_record = ','.join([data_label, 
-                                     str(rule_label), 
-                                     str(round(sample_violation_rate, 5)), 
-                                     FLAGS.label or label])
+        sample_violation_rate, num_examples, min_runtime, max_runtime = detector(
+            constructor, rulepath, label=label, limit=detector_limit)
+        run_label = FLAGS.label or label
+        detection_record = ','.join([
+            run_label,
+            data_label,
+            str(rule_label),
+            str(sample_violation_rate),
+            str(num_examples),
+            f"{max_runtime:.2f}",
+        ])
         detection_file = "detection_records.csv"
         if Path(detection_file).exists():
             with open(detection_file, 'a') as f:
                 f.write(detection_record + '\n')
         else:
             with open(detection_file, 'w') as f:
-                f.write("data,rule,sample_violation_rate,label\n")
+                f.write("label,data,rule,sample_violation_rate,examples,runtime_seconds\n")
                 f.write(detection_record + '\n')
 
     sys.exit(
