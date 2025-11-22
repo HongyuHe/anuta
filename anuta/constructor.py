@@ -205,11 +205,11 @@ class Constructor(object):
                     else:
                         log.warning(f"Duplicated {predicate=}.")
                     if predicate_values.nunique() > 1:
-                        if domaintype != DomainType.CATEGORICAL:
-                            adf[predicate] = predicate_values
-                            abstract_predicates.add(predicate)
-                            categoricals.append(predicate)
-                            self.colvars[predicate].add(varname)
+                        # if domaintype != DomainType.CATEGORICAL:
+                        adf[predicate] = predicate_values
+                        abstract_predicates.add(predicate)
+                        categoricals.append(predicate)
+                        self.colvars[predicate].add(varname)
                     else:
                         predicate = predicate.replace('@', '')
                         if predicate_values.iloc[0] == 0:
