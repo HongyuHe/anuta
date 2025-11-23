@@ -231,6 +231,8 @@ def validator(
     
     violation_record = Counter(aggregated_violations)
     pprint(violation_record)
+    print(f"Violated rules: {violation_record[True]}/{len(aggregated_violations)}")
+    print(f"Invalid samples: {total_invalid_samples}/{len(constructor.df)}")
     
     rule_violation_rate = violation_record[True] / len(aggregated_violations)
     sample_violation_rate = total_invalid_samples / len(constructor.df)

@@ -333,10 +333,11 @@ class EntropyTreeLearner(TreeLearner):
         rules = self.learned_rules | self.prior
         sprules = []
         for rule in tqdm(rules, desc="... Converting learned rules to sympy"):   
-            if rule in (true, false):
-                continue
             try:
-                sprules.append(sp.sympify(rule))
+                sprule = sp.sympify(rule)
+                if rule in (true, false):
+                    continue                
+                sprules.append(sprule)
             except Exception as e:
                 log.error(f"Failed to sympify rule: {rule}. Skipping.")
                 continue

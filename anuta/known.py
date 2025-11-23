@@ -53,6 +53,37 @@ def tcpflags2hex(dot_flags: str) -> str:
             value |= mapping[ch]
     return hex(value)
 
+def hex2dotflags(value) -> str:
+    """
+    Reverse mapping of tcpflags2hex. Convert a numeric value (int or hex str)
+    back to a Wireshark-style TCP flag string.
+    """
+    if isinstance(value, str):
+        value = int(value, 16)
+    elif not isinstance(value, int):
+        raise TypeError(f"Unsupported TCP flag value type: {type(value)}")
+
+    ordered_flags = [
+        ('C', 0x80, True),
+        ('E', 0x40, True),
+        ('U', 0x20, False),
+        ('A', 0x10, False),
+        ('P', 0x08, False),
+        ('R', 0x04, False),
+        ('S', 0x02, False),
+        ('F', 0x01, False),
+    ]
+
+    ce_prefix = []
+    flag_body = []
+    for letter, bit, is_prefix in ordered_flags:
+        ch = letter if value & bit else '.'
+        (ce_prefix if is_prefix else flag_body).append(ch)
+
+    ce_prefix = ''.join(ce_prefix)
+    flag_body = ''.join(flag_body)
+    return ('' if ce_prefix == '..' else ce_prefix) + flag_body
+
 def hex2tcpflags(bitmask) -> str:
     """
     Convert a numeric TCP flags bitmask to a list of corresponding flag names.

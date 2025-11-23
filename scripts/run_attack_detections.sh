@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-RULES_PATH="rules/dt_cidds_all_e2_norm_abstract_cat.pl"
+RULES_PATH="rules/dt_cidds_all_e23_norm_numeric.pl"
 DATASET="cidds"
 
 attack_files=(
