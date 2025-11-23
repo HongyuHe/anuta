@@ -210,25 +210,17 @@ class EntropyTreeLearner(TreeLearner):
                 epoch += 1
                 print(f"\tEpochs {epoch}/{max_sc_epochs} of separate-and-conquer.")
                 
-                start = perf_counter()
                 treeid = 1
+                training_time = 0.0
+                extraction_time = 0.0
+                total_unclassified = 0
+                before_epoch_rules = len(self.learned_rules)
                 for target, feature_group in self.featuregroups.items():
                     if target in fully_calssified:
                         log.info(f"Skipping training for {target}, already fully classified.")
                         continue
                     
                     log.info(f"{target=}: {len(feature_group)} feature groups.")
-                    print(f"... Trained {treeid}/{self.total_treegroups} ({treeid/self.total_treegroups:.1%}) tree groups.", end='\r')
-                    if target in self.categoricals:
-                        params = self.model_configs['classification']
-                    else:
-                        assert '@' not in target, f"Abstract variable {target} cannot be a regression target."
-                        if epoch > 1: 
-                            #* No need to train regression trees in more epochs
-                            continue
-                        params = self.model_configs['regression']
-                    
-                    #! Assuming one treegroup per target variable, otherwise they'd share the same frame!
                     training_frame = self.target_training_frame[target]
                     try:
                         if len(training_frame[target].unique()) <= 1:
@@ -240,33 +232,56 @@ class EntropyTreeLearner(TreeLearner):
                         fully_calssified.append(target)
                         continue
                     
+                    if target in self.categoricals:
+                        params = self.model_configs['classification']
+                    else:
+                        assert '@' not in target, f"Abstract variable {target} cannot be a regression target."
+                        if epoch > 1: 
+                            #* No need to train regression trees in more epochs
+                            continue
+                        params = self.model_configs['regression']
+                    
+                    target_trained = False
                     for i, features in enumerate(feature_group):                    
                         treeid += 1
-                        #* Special symbols in model_id could cause issues when deleting related objects in H2O.
-                        # model_id = f"'{target}_tree_{i+1}'"
                         model_id = f"tree{treeid}_featuregroup{i}"
                         params['model_id'] = model_id
                         dtree = H2ORandomForestEstimator(**params)
                         
                         try:
+                            train_start = perf_counter()
                             dtree.train(x=list(features), y=target, training_frame=training_frame)  
+                            training_time += perf_counter() - train_start
                             self.target_trees[target].append(dtree)
                         except Exception as e:
-                            #* H2O lib could fail to train a tree (e.g., if all values are the same, frame too small, etc.)
                             log.warning(f"Couldn't train tree for {target} with {len(features)} features.")
                             self.target_trees[target].append(None)
-                            
+                        target_trained = True
                         print(f"... Trained {treeid}/{self.total_treegroups} ({treeid/self.total_treegroups:.1%}) tree groups.", end='\r')
-                        print(f"... Trained {treeid}/{self.total_treegroups} ({treeid/self.total_treegroups:.1%}) tree groups.", end='\r')
-                end = perf_counter()
-                training_time = end - start
+                    
+                    if not target_trained:
+                        continue
+                    
+                    start_extract = perf_counter()
+                    self.learned_rules |= self.extract_rules_from_treepaths()
+                    extraction_time += perf_counter() - start_extract
+                    
+                    if target in self.categoricals:
+                        training_frame = self.get_unclassified_examples(target)
+                        self.target_training_frame[target] = training_frame
+                        num_unclassified = training_frame.nrows
+                        total_unclassified += num_unclassified
+                        
+                        if num_unclassified == 0:
+                            log.info(f"All examples for {target} are classified. Skipping.")
+                            fully_calssified.append(target)
+                        else:
+                            log.info(f"{num_unclassified/self.examples.nrows:.3%} unclassified examples for {target}.")
+                    
+                    self._cleanup_tree_models(targets=[target])
+                    gc.collect()
                 
-                start = perf_counter()
-                before_nrules = len(self.learned_rules)
-                self.learned_rules |= self.extract_rules_from_treepaths()
-                new_rule_count = len(self.learned_rules) - before_nrules
-                end = perf_counter()
-                extraction_time = end - start
+                new_rule_count = len(self.learned_rules) - before_epoch_rules
                 new_rule_counts.append(new_rule_count)
                 if new_rule_count == 0:
                     log.info(f"No new rules learned in epoch {epoch}. Stopping.")
@@ -274,33 +289,8 @@ class EntropyTreeLearner(TreeLearner):
                     break
                 print()
                 
-                total_unclassified = 0
-                for target in self.categoricals:
-                    if target in fully_calssified:
-                        log.info(f"Skipping {target}, already fully classified.")
-                        continue
-                    if target not in self.target_trees:
-                        log.warning(f"No trees trained for {target}. Skipping.")
-                        continue
-                    
-                    #& Training frame of the next epoch is the unclassified examples of this epoch.
-                    training_frame = self.get_unclassified_examples(target)
-                    self.target_training_frame[target] = training_frame
-                    num_unclassified = training_frame.nrows
-                    total_unclassified += num_unclassified
-                    
-                    if num_unclassified == 0:
-                        log.info(f"All examples for {target} are classified. Skipping.")
-                        fully_calssified.append(target)
-                        continue
-                    log.info(f"{num_unclassified/self.examples.nrows:.3%} unclassified examples for {target}.")
-                
                 classified_more = unclassified_counts[-1] - total_unclassified
                 unclassified_counts.append(total_unclassified)
-                #* Remove all H2O models to free memory
-                self._cleanup_tree_models()
-                # self.target_treepaths.clear()
-                gc.collect()
                 
                 print(f"\tTraining {self.total_treegroups} tree groups took {training_time:.2f} seconds.")
                 print(f"\tExtracting rules took {extraction_time:.2f} seconds.")
@@ -320,17 +310,19 @@ class EntropyTreeLearner(TreeLearner):
             self._finalize_learning(epoch, new_rule_counts, unclassified_counts, interrupted)
         return
 
-    def _cleanup_tree_models(self):
+    def _cleanup_tree_models(self, targets: Optional[Iterable[str]] = None):
         """Remove tracked H2O models to free JVM memory."""
-        for trees in self.target_trees.values():
+        targets = list(targets) if targets is not None else list(self.target_trees.keys())
+        for target in targets:
+            trees = self.target_trees.pop(target, [])
             for model in trees:
                 if model is None:
                     continue
                 try:
                     h2o.remove(model)
                 except Exception as exc:
-                    log.warning(f"Failed to remove H2O model: {exc}")
-        self.target_trees.clear()
+                    log.warning(f"Failed to remove H2O model `{target}`: {exc}")
+            self.target_treepaths.pop(target, None)
 
     def _finalize_learning(self, epoch, new_rule_counts, unclassified_counts, interrupted):
         status = "interrupted" if interrupted else "completed"
