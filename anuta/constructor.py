@@ -971,7 +971,8 @@ class CiddsAtk(Constructor):
         self.df['DstIpAddr'] = self.df['DstIpAddr'].apply(cidds_subnet_map)
         self.df['SrcPt'] = self.df['SrcPt'].apply(cidds_port_map)
         self.df['DstPt'] = self.df['DstPt'].apply(cidds_port_map)
-        self.df['Tos'] = self.df['Tos'].apply(cidds_tos_map)
+        if 'Tos' in self.df.columns:
+            self.df['Tos'] = self.df['Tos'].apply(cidds_tos_map)
         self.categoricals = cidds_categoricals + ['IsBroadcast', 'Tos']
         
         multiconstants: List[Tuple[str, Constants]] = []

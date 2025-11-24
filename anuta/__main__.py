@@ -124,7 +124,7 @@ if __name__ == '__main__':
             if FLAGS.limit else constructor.df
         
         assert FLAGS.rules, "No rules file provided."
-        rulepath = FLAGS.rules
+        rulepath: str = FLAGS.rules
         assert rulepath.endswith('.pl'), "Invalid rule file."
         rules = Theory.load_constraints(rulepath, False)
         rule_label = "_".join(rulepath.split('_')[1:])[:-3]
