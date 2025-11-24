@@ -278,7 +278,7 @@ def cidds_subnet_map(ip: str):
     return ipnum
 
 cidds_subnets = [000, 100, 200, 210, 220, 666, 888]
-cidds_tos_values = [0, 8, 48]
+cidds_tos_values = [0, 8, 48,  32, 192,  16]
 
 def cidds_isboradcast_map(ip: str):
     if '.255' in ip:

@@ -979,19 +979,20 @@ class CiddsAtk(Constructor):
         quantiles = [0.99, 0.95, 0.5]
         topk = 3
         for name in variables:
-            # if 'ip' in name.lower():
-            #     multiconstants.append(
-            #         (name, Constants(kind=ConstantType.ASSIGNMENT, values=cidds_subnets))
-            #     )
-            # if 'pt' in name.lower():
-            #     multiconstants.append(
-            #         (name, Constants(kind=ConstantType.ASSIGNMENT, values=cidds_ports))
-            #     )
-            # if 'tos' in name.lower():
-            #     multiconstants.append(
-            #         (name, Constants(kind=ConstantType.ASSIGNMENT, values=cidds_tos_values))
-            #     )
+            if 'ip' in name.lower():
+                multiconstants.append(
+                    (name, Constants(kind=ConstantType.ASSIGNMENT, values=cidds_subnets))
+                )
+            if 'pt' in name.lower():
+                multiconstants.append(
+                    (name, Constants(kind=ConstantType.ASSIGNMENT, values=cidds_ports))
+                )
+            if 'tos' in name.lower():
+                multiconstants.append(
+                    (name, Constants(kind=ConstantType.ASSIGNMENT, values=cidds_tos_values))
+                )
             if 'duration' in name.lower():
+                #* The `Duration` is measured in seconds.
                 quantiles_values = get_quantiles(self.df[name], quantiles)
                 multiconstants.append(
                     (name, Constants(kind=ConstantType.LIMIT, values=quantiles_values))
