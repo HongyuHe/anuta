@@ -1,6 +1,7 @@
 import gc
 import math
 import h2o
+import psutil
 from h2o.estimators import H2ORandomForestEstimator
 from h2o.tree import H2OTree, H2OLeafNode, H2OSplitNode
 from typing import *
@@ -22,6 +23,11 @@ from anuta.theory import Theory
 from anuta.known import *
 from anuta.utils import log, true, false
 from anuta.cli import FLAGS
+
+
+class MemoryLimitExceeded(RuntimeError):
+    """Raised when system memory crosses the configured threshold."""
+    pass
 
 
 def get_featuregroups(
@@ -113,9 +119,20 @@ class TreeLearner(object):
             len(list(self.featuregroups.values())[0])  # Total number of tree groups to learn
         
         self.prior = constructor.anuta.prior_kb
-        
+        self.memory_stop_threshold = getattr(FLAGS.config, 'MEMORY_STOP_THRESHOLD', 2)
+    
     def learn(self):
         raise NotImplementedError("Subclasses should implement this method.")
+    
+    def _check_memory_budget(self):
+        """Raise if the process memory usage exceeds the configured threshold."""
+        if not self.memory_stop_threshold:
+            return
+        vm = psutil.virtual_memory()
+        used_ratio = 1 - (vm.available / vm.total)
+        if used_ratio >= self.memory_stop_threshold:
+            raise MemoryLimitExceeded(
+                f"{used_ratio:.1%} of RAM used (threshold {self.memory_stop_threshold:.1%}).")
 
 class EntropyTreeLearner(TreeLearner):
     """Tree learner based on information gain, using H2O's implementation."""
@@ -204,7 +221,7 @@ class EntropyTreeLearner(TreeLearner):
         new_rule_counts = []
         fully_calssified = []
         unclassified_counts = [self.examples.nrows*len(self.categoricals)]
-        interrupted = False
+        stop_reason = None
         try:
             while epoch < max_sc_epochs and new_rule_count > 0:
                 epoch += 1
@@ -219,6 +236,7 @@ class EntropyTreeLearner(TreeLearner):
                     if target in fully_calssified:
                         log.info(f"Skipping training for {target}, already fully classified.")
                         continue
+                    self._check_memory_budget()
                     
                     log.info(f"{target=}: {len(feature_group)} feature groups.")
                     training_frame = self.target_training_frame[target]
@@ -304,11 +322,15 @@ class EntropyTreeLearner(TreeLearner):
                     log.info(f"No additional examples classified in epoch {epoch}. Stopping.")
                     break
         except KeyboardInterrupt:
-            interrupted = True
+            stop_reason = "keyboard interrupt"
             log.warning("Keyboard interrupt received. Saving learned rules and exiting training loop.")
+        except MemoryLimitExceeded as err:
+            stop_reason = "memory limit exceeded"
+            log.warning(f"Stopping early due to memory pressure: {err}")
         finally:
-            self._finalize_learning(epoch, new_rule_counts, unclassified_counts, interrupted)
+            self._finalize_learning(epoch, new_rule_counts, unclassified_counts, stop_reason)
         return
+
 
     def _cleanup_tree_models(self, targets: Optional[Iterable[str]] = None):
         """Remove tracked H2O models to free JVM memory."""
@@ -323,12 +345,36 @@ class EntropyTreeLearner(TreeLearner):
                 except Exception as exc:
                     log.warning(f"Failed to remove H2O model `{target}`: {exc}")
             self.target_treepaths.pop(target, None)
+        gc.collect()
 
-    def _finalize_learning(self, epoch, new_rule_counts, unclassified_counts, interrupted):
-        status = "interrupted" if interrupted else "completed"
+    def _merge_rules_by_premise(self, rules: Iterable[str]) -> Set[str]:
+        """Combine rules with identical premises into a single rule with OR-ed conclusions."""
+        grouped: Dict[str, Set[str]] = defaultdict(set)
+        for rule in rules:
+            if '>>' not in rule:
+                # Skip malformed entries such as the prior sentinel values.
+                continue
+            premise, conclusion = rule.split('>>', 1)
+            grouped[premise.strip()].add(conclusion.strip())
+
+        merged_rules: Set[str] = set()
+        for premise, conclusions in grouped.items():
+            if len(conclusions) == 1:
+                conclusion = next(iter(conclusions))
+            else:
+                conclusion = f"( {' | '.join(sorted(conclusions))} )"
+            merged_rules.add(f"{premise} >> {conclusion}")
+        return merged_rules
+
+    def _finalize_learning(self, epoch, new_rule_counts, unclassified_counts, stop_reason: Optional[str] = None):
+        status = f"stopped ({stop_reason})" if stop_reason else "completed"
         log.info(f"Learning {status} after {epoch} epochs.")
         print(f"\t{new_rule_counts=}")
         print(f"\t{unclassified_counts=}")
+        
+        before_merge = len(self.learned_rules)
+        self.learned_rules = self._merge_rules_by_premise(self.learned_rules)
+        log.info(f"Merged learned rules: {before_merge} -> {len(self.learned_rules)}")
         
         rules = self.learned_rules | self.prior
         sprules = []
@@ -456,7 +502,10 @@ class EntropyTreeLearner(TreeLearner):
                             if varname not in merged_conditions:
                                 merged_conditions[varname] = defaultdict(None)
 
-                            if op in ['∈', '∉']:
+                            if op == '∈':
+                                values = merged_conditions[varname].get(op, set(varval))
+                                merged_conditions[varname][op] = values & set(varval) 
+                            elif op == '∉':
                                 values = merged_conditions[varname].get(op, set())
                                 merged_conditions[varname][op] = values | set(varval)
                             elif op == '>':  
@@ -481,19 +530,20 @@ class EntropyTreeLearner(TreeLearner):
                     
                                 invals = _invals - _outvals
                                 outvals = _outvals - _invals
-                                domain = set(self.domains[varname])
 
-                                #* Use the most succinct representation
-                                if invals:
-                                    diffvals = domain - invals
-                                    if len(diffvals) < len(invals):
-                                        outvals |= diffvals
-                                        invals = set()
-                                if outvals:
-                                    diffvals = domain - outvals
-                                    if len(diffvals) < len(outvals):
-                                        invals |= diffvals
-                                        outvals = set()
+                                #! Below introduces correctness issues!!!
+                                # #* Use the most succinct representation
+                                # domain = set(self.domains[varname])
+                                # if invals:
+                                #     diffvals = domain - invals
+                                #     if len(diffvals) < len(invals):
+                                #         outvals |= diffvals
+                                #         invals = set()
+                                # if outvals:
+                                #     diffvals = domain - outvals
+                                #     if len(diffvals) < len(outvals):
+                                #         invals |= diffvals
+                                #         outvals = set()
                                 
                                 predicate = ''
                                 for val in invals:
@@ -541,7 +591,7 @@ class EntropyTreeLearner(TreeLearner):
                                 if valmin > float('-inf'):
                                     predicates.append(f"({varname} > {valmin})")
                                 if valmax < float('+inf'):
-                                        predicates.append(f"({varname} <= {valmax})")
+                                    predicates.append(f"({varname} <= {valmax})")
 
                         if predicates:
                             premise = ' & '.join(predicates)
@@ -579,7 +629,7 @@ class EntropyTreeLearner(TreeLearner):
                 rules = set()
                 for premise, conclusions in ruleset.items():
                     if target in self.categoricals:
-                        conclusion = '( ' + '&'.join(conclusions) + ' )' \
+                        conclusion = '( ' + '|'.join(conclusions) + ' )' \
                             if len(conclusions) > 1 else conclusions.pop()
                     else:
                         targetmin = ruleset[premise]['min']
@@ -592,7 +642,8 @@ class EntropyTreeLearner(TreeLearner):
                                 # log.warning(
                                 #     f"Skipping overly strict rule for {target} (min==max: {targetmin}).")
                                 continue
-                        conclusion = f"(({target}>={targetmin}) & ({target}<={targetmax}))"
+                        else:
+                            conclusion = f"(({target}>={targetmin}) & ({target}<={targetmax}))"
                         # \ if targetmin != targetmax else f"Eq({target}, {targetmin})"
                     
                     rule = f"({premise}) >> {conclusion}"
@@ -651,6 +702,9 @@ class EntropyTreeLearner(TreeLearner):
             if node.left_levels or node.right_levels:
                 left_categories = sorted([int(v) for v in node.left_levels])
                 right_categories = sorted([int(v) for v in node.right_levels])
+                # print(f"{varname=} categorical split: ")
+                # print(f"  Left levels: {left_categories}")
+                # print(f"  Right levels: {right_categories}")
                 if node.left_levels:
                     cond_left = f"{varname}$∈${left_categories}"
                     cond_right = f"{varname}$∉${left_categories}"
@@ -822,7 +876,10 @@ class XgboostTreeLearner(TreeLearner):
                         if varname not in var_conditions:
                             var_conditions[varname] = defaultdict(None)
 
-                        if op in ['∈', '∉']:
+                        if op == '∈':
+                            values = var_conditions[varname].get(op, set(varval))
+                            var_conditions[varname][op] = values & set(varval) 
+                        elif op == '∉':
                             values = var_conditions[varname].get(op, set())
                             var_conditions[varname][op] = values | set(varval)
                         elif op == '≥':
@@ -1270,7 +1327,10 @@ class LightGbmTreeLearner(TreeLearner):
                         if varname not in var_conditions:
                             var_conditions[varname] = defaultdict(None)
 
-                        if op in ['∈', '∉']:
+                        if op == '∈':
+                            values = var_conditions[varname].get(op, set(varval))
+                            var_conditions[varname][op] = values & set(varval) 
+                        elif op == '∉':
                             values = var_conditions[varname].get(op, set())
                             var_conditions[varname][op] = values | set(varval)
                         elif op == '>':
