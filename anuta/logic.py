@@ -1,6 +1,8 @@
 from collections import defaultdict
+import heapq
 from itertools import combinations
 from pathlib import Path
+import random
 from multiprocess import Pool
 from time import perf_counter, time
 from typing import *
@@ -416,7 +418,13 @@ class LogicLearner(object):
         #     max_size=max_predicates,
         #     max_solutions=max_learned_rules,
         # )
-        covers = self.enumerate_minimal_hitting_sets_suppression(
+        # covers = self.enumerate_minimal_hitting_sets_suppression(
+        #     # predicates,
+        #     evidence_sets=evidence_sets,
+        #     max_size=max_predicates,
+        #     max_solutions=max_learned_rules,
+        # )
+        covers = self.enumerate_minimal_hitting_sets(
             # predicates,
             evidence_sets=evidence_sets,
             max_size=max_predicates,
@@ -452,6 +460,239 @@ class LogicLearner(object):
             outputf += ".pl"
         Theory.save_constraints(learned_rules, outputf)
         return
+    
+    def enumerate_minimal_hitting_sets(
+        self,
+        evidence_sets: List[FrozenSet[Constraint]],
+        max_size: Optional[int] = None,
+        max_solutions: Optional[int] = None,
+    ) -> List[Set[Constraint]]:
+        """
+        Enumerate all minimal hitting sets H such that ∀E in evidence_sets: H ∩ E ≠ ∅.
+        
+        Iterative stack-based DFS (no recursion).
+        Enforces variable-disjointness: predicates in a hitting set cannot share variables.
+        """
+        if not evidence_sets:
+            return []
+
+        # Build idx_by_pred: Map<Predicate, Set<EvidenceSetIndices>>
+        idx_by_pred: Dict[Constraint, Set[int]] = defaultdict(set)
+        empty_esets: Set[int] = set()
+        for i, E in enumerate(tqdm(evidence_sets, desc="... Indexing predicates")):
+            if not E:
+                empty_esets.add(i)
+            for p in E:
+                idx_by_pred[p].add(i)
+        
+        # If any evidence set is empty, no hitting set is possible.
+        if empty_esets:
+            log.warning(f"Found {len(empty_esets)} empty evidence sets out of {len(evidence_sets)}.")
+            log.warning("Problem is unsatisfiable due to one or more empty evidence sets.")
+            return []
+
+        # All evidence sets that must be covered (all of them, since empty_esets is 0)
+        FULL = set(range(len(evidence_sets)))
+
+        #* --- PERFORMANCE FIX (use set for solutions) ---
+        global_solutions: Set[FrozenSet[Constraint]] = set()
+
+        def _dominated_by_existing(fc: FrozenSet[Constraint]) -> bool:
+            """Checks if a new candidate frozenset is a superset of any existing solution."""
+            for sol in global_solutions:
+                if sol.issubset(fc):  # fc is a superset of an existing solution
+                    return True
+            return False
+
+        def _optimistic_lb(uncovered: Set[int]) -> int:
+            """Calculates a simple greedy lower bound on the number of predicates needed."""
+            if not uncovered:
+                return 0
+            best_gain = 0
+            for p in idx_by_pred:
+                gain = len(uncovered & idx_by_pred[p])
+                best_gain = max(best_gain, gain)
+                if best_gain == len(uncovered): # Perfect predicate found
+                    return 1
+            
+            # Ceiling division to get lower bound
+            return 1 if best_gain == 0 else ((len(uncovered) + best_gain - 1) // best_gain)
+
+        #* --- PERFORMANCE FIX (efficient pivot selection) ---
+        def _pick_pivot(uncovered: Set[int]) -> int:
+            """Picks the uncovered evidence set with the smallest size (branching factor)."""
+            best_i, best_deg = None, float('inf')
+            for i in uncovered:
+                # len(frozenset) is efficient
+                deg = len(evidence_sets[i])
+                if deg < best_deg:
+                    best_deg, best_i = deg, i
+            return best_i
+        
+        # This new function REPLACES _pick_pivot
+        def _get_feasible_candidates(
+            uncovered: Set[int], 
+            chosen_vars: Set[str]
+        ) -> Optional[List[Constraint]]:
+            """
+            Finds the uncovered set with the *smallest* number of feasible candidates.
+            
+            - A candidate is "feasible" if it's disjoint from chosen_vars.
+            - If any uncovered set has 0 feasible candidates, this is a dead branch,
+            so we return None to signal an immediate backtrack.
+            - Otherwise, returns the sorted list of feasible candidates from the 
+            best pivot set (smallest branching factor).
+            """
+            best_candidates_list: Optional[List[Constraint]] = None
+            best_deg = float('inf')
+
+            for i in uncovered:
+                feasible_candidates_for_i = []
+                for p in evidence_sets[i]:
+                    # The disjointness check
+                    if not any(str(v) in chosen_vars for v in p.expr.free_symbols):
+                        feasible_candidates_for_i.append(p)
+                
+                feasible_degree = len(feasible_candidates_for_i)
+
+                #* --- PRUNING ---
+                # If an uncovered set has 0 feasible candidates, this entire
+                # search branch is impossible. Prune it immediately.
+                if feasible_degree == 0:
+                    return None  # Signal to backtrack
+
+                # This is a better pivot; store its candidates
+                if feasible_degree < best_deg:
+                    best_deg = feasible_degree
+                    best_candidates_list = feasible_candidates_for_i
+            
+            # If best_candidates_list is still None, something went wrong
+            # (e.g., uncovered was empty, but that's checked earlier)
+            if best_candidates_list is None:
+                log.error("No feasible candidates found, but uncovered is not empty.")
+                return [] # Should not happen if uncovered is not empty
+                
+            #* --- SORTING ---
+            # Sort the best list by "gain" to explore most promising branches first.
+            # This was previously done in the main loop.
+            best_candidates_list.sort(key=lambda p: -len(idx_by_pred[p] & uncovered))
+            
+            return best_candidates_list
+
+        def run_search():
+            solutions_this_run: Set[FrozenSet[Constraint]] = set()
+            stack = [(set(), set(), FULL, set(), None, 0)]  
+            # frame: (chosen, covered, uncovered, chosen_vars, candidates, next_idx)
+
+            start_time = perf_counter()
+            last_solution_time = perf_counter()
+
+            while stack:
+                #* --- Global Timeouts ---
+                if perf_counter() - start_time > cfg.TIMEOUT_SEC:
+                    log.warning(f"Learning timed out after {cfg.TIMEOUT_SEC//60}min.")
+                    break
+                
+                # stall timeout
+                if perf_counter() - last_solution_time > cfg.STALL_TIMEOUT_SEC:
+                    log.warning(f"Search stalled for {cfg.STALL_TIMEOUT_SEC//60}min. Stopping.")
+                    break
+
+                chosen, covered, uncovered, chosen_vars, candidates, next_idx = stack.pop()
+
+                #* --- SOLUTION FOUND (Optimized) ---
+                if not uncovered:
+                    fc = frozenset(chosen)
+                    if not _dominated_by_existing(fc):
+                        # Prune global supersets efficiently
+                        supersets = {s for s in global_solutions if fc.issubset(s)}
+                        global_solutions.difference_update(supersets)
+                        global_solutions.add(fc)
+
+                        solutions_this_run.add(fc)
+                        last_solution_time = perf_counter()
+                        progress.update(1)
+                        
+                        if max_solutions and len(solutions_this_run) >= max_solutions:
+                            return  # Stop this search run
+                    continue
+
+                #* --- PRUNING ---
+                if max_size is not None and len(chosen) >= max_size:
+                    continue
+
+                if max_size is not None:
+                    lb = _optimistic_lb(uncovered)
+                    if len(chosen) + lb > max_size:
+                        continue
+
+                #* --- CANDIDATE GENERATION (Optimized) ---
+                if candidates is None:
+                    pivot = _pick_pivot(uncovered)
+                    
+                    #* --- PERFORMANCE FIX (simplified list comprehension) ---
+                    candidates = [
+                        p for p in evidence_sets[pivot]
+                        if not any(str(v) in chosen_vars for v in p.expr.free_symbols)
+                    ]
+                    # Sort candidates to explore most promising branches first
+                    candidates = sorted(candidates, key=lambda p: -len(idx_by_pred[p] & uncovered))
+                    next_idx = 0
+                
+                # #* --- CANDIDATE GENERATION (MODIFIED) ---
+                # if candidates is None:
+                    
+                #     # This one call does pivot selection, disjointness checks,
+                #     # pruning, candidate generation, and sorting.
+                #     candidates = _get_feasible_candidates(uncovered, chosen_vars)
+                    
+                #     #* --- PRUNING ---
+                #     # This branch is impossible (an uncovered set has 0 feasible
+                #     # candidates). Backtrack immediately.
+                #     if candidates is None:
+                #         continue
+                    
+                #     next_idx = 0
+
+                # Backtracking: exhausted all candidates for this pivot
+                if next_idx >= len(candidates):
+                    continue
+
+                #* --- STACK PUSH (Branch 1: "Don't choose p") ---
+                # This state explores solutions *without* candidates[next_idx]
+                stack.append((chosen, covered, uncovered, chosen_vars, candidates, next_idx + 1))
+
+                #* --- STACK PUSH (Branch 2: "Choose p") ---
+                p = candidates[next_idx]
+                
+                #* --- PERFORMANCE FIX (Removed 'if p in chosen:' dead code) ---
+                new_chosen = set(chosen)
+                new_chosen.add(p)
+                
+                # # Prune if this new partial solution is already dominated
+                # fc_partial = frozenset(new_chosen)
+                # if _dominated_by_existing(fc_partial):
+                #     continue
+                
+                new_covered = covered | idx_by_pred[p]
+                new_vars = chosen_vars | {str(v) for v in p.expr.free_symbols}
+                new_uncovered = uncovered - idx_by_pred[p]
+                
+                stack.append((new_chosen, new_covered, new_uncovered, new_vars, None, 0))
+
+        progress = tqdm(desc=f"... Enumerating hitting sets (max_size={max_size})",
+                        unit=" sets", total=max_solutions)
+
+        try:
+            run_search()
+        except KeyboardInterrupt:
+            log.warning("\nSearch interrupted by user (Ctrl+C). Returning partial results.")
+        finally:
+            progress.close()  # Ensure progress bar is always closed
+
+        # Convert final set of frozensets to the required List[Set]
+        return [set(s) for s in global_solutions]
+
         
     def enumerate_minimal_hitting_sets_suppression(
         self,
@@ -472,7 +713,7 @@ class LogicLearner(object):
         vtypes = {vtype for vtype in self.vtypes.values() if vtype not in [VariableType.UNKNOWN]}
         suppression_combos = []
         if cfg.ENABLE_TYPE_SUPPRESSION:
-            for r in range(len(vtypes)):
+            for r in range(len(vtypes)+1):
                 for combo in combinations(vtypes, r):
                     suppression_combos.append(set(combo))
         else:
@@ -1146,7 +1387,7 @@ class LogicLearner(object):
                 #* Skip fine-grained ingress for now (too many combinations).
                 continue
             domaintype = TYPE_DOMIAN[vtype]
-            if domaintype != DomainType.NUMERICAL: 
+            if domaintype == DomainType.CATEGORICAL:
                 #* Only augment numerical vars.
                 continue
             
@@ -1225,7 +1466,7 @@ class LogicLearner(object):
                 #         predicates.add(f"Eq({lhs}, {value})")
                 #         predicates.add(f"Ne({lhs}, {value})")
             # else:
-                #& DomainType.NUMERICAL
+                #& DomainType.NUMERICAL_INTEGER / NUMERICAL_REAL
                 # if (lhs in self.constants
                 #     and self.constants[lhs].kind == ConstantType.LIMIT):
                 #     #& X > c and X ≤ c
@@ -1312,32 +1553,32 @@ class LogicLearner(object):
                 
                 #* Doesn't make sense to compare sequencing variables other than equality.
                 if (vtype_lhs != VariableType.SEQUENCING
-                    and domaintype_lhs == DomainType.NUMERICAL ):
-                    assert domaintype_rhs == DomainType.NUMERICAL, \
-                        "LHS and RHS must have the same domain type."
-                    #& Comparison predicates: A>B
-                    predicate = f"({lhs}>{rhs})"
-                    predicate_values = (self.examples[lhs]>self.examples[rhs]).astype(int)
-                    if predicate_values.nunique() > 1:
-                        self.examples[predicate] = predicate_values
-                        predicates.add(predicate)
-                    else:
-                        if predicate_values.iloc[0] == 0:
-                            predicate = f"({lhs}<={rhs})"
-                        prior_rules.add(predicate)
-                        # continue
-                    
-                    #& Comparison predicates: A<B
-                    predicate = f"({lhs}<{rhs})"
-                    predicate_values = (self.examples[lhs]<self.examples[rhs]).astype(int)
-                    if predicate_values.nunique() > 1:
-                        self.examples[predicate] = predicate_values
-                        predicates.add(predicate)
-                    else:
-                        if predicate_values.iloc[0] == 0:
-                            predicate = f"({lhs}>={rhs})"
-                        prior_rules.add(predicate)
-                        # continue
+                    and domaintype_lhs in (DomainType.INTEGER, DomainType.REAL) ):
+                        assert domaintype_rhs in (DomainType.INTEGER, DomainType.REAL), \
+                            "LHS and RHS must have the same domain type."
+                        #& Comparison predicates: A>B
+                        predicate = f"({lhs}>{rhs})"
+                        predicate_values = (self.examples[lhs]>self.examples[rhs]).astype(int)
+                        if predicate_values.nunique() > 1:
+                            self.examples[predicate] = predicate_values
+                            predicates.add(predicate)
+                        else:
+                            if predicate_values.iloc[0] == 0:
+                                predicate = f"({lhs}<={rhs})"
+                            prior_rules.add(predicate)
+                            # continue
+                        
+                        #& Comparison predicates: A<B
+                        predicate = f"({lhs}<{rhs})"
+                        predicate_values = (self.examples[lhs]<self.examples[rhs]).astype(int)
+                        if predicate_values.nunique() > 1:
+                            self.examples[predicate] = predicate_values
+                            predicates.add(predicate)
+                        else:
+                            if predicate_values.iloc[0] == 0:
+                                predicate = f"({lhs}>={rhs})"
+                            prior_rules.add(predicate)
+                            # continue
         #^ End for j, lhs in enumerate(self.variables)
         # prior_rules = set()
         '''Add domain constraints to prior rules.'''
@@ -1354,7 +1595,7 @@ class LogicLearner(object):
         for varname in self.variables:
             vtype = variable_types[varname]
             domaintype = TYPE_DOMIAN[vtype]
-            if domaintype == DomainType.NUMERICAL:
+            if domaintype in (DomainType.INTEGER, DomainType.REAL):
                 bounds = self.domains[varname].bounds
                 prior_rules.add(f"({varname}>={bounds.lb})")
                 prior_rules.add(f"({varname}<={bounds.ub})")

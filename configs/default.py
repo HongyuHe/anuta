@@ -4,7 +4,8 @@ from ml_collections import config_dict
 def get_config():
     default_config = config_dict.ConfigDict()
     
-    default_config.TIMEOUT_SEC = 24 * 60 * 60  # 24 hours
+    # 24 hours
+    default_config.TIMEOUT_SEC = 24 * 60 * 60
     #* Maximum number of predicates in a rule
     default_config.MAX_PREDICATES = 8
     #* Maximum number of rules to learn
@@ -14,13 +15,20 @@ def get_config():
     #* Enable type-based variable suppression
     default_config.ENABLE_TYPE_SUPPRESSION = False
     
-    default_config.LEVELWISE_EPOCHS = 10  #* Number of epochs for levelwise learning
+    #* Number of epochs for levelwise learning
+    default_config.LEVELWISE_EPOCHS = 10
     
     '''Tree leaning configuration'''
-    default_config.MAX_COMBO_SIZE = 0 #* If combo size is non-positive, use all combinations
-    default_config.MAX_SEPARATE_CONQUER_EPOCHS = 40  #* Maximum rounds of remove-and-conquer
-    default_config.MIN_SPLIT_GAIN = 1e-6  #* Minimum gain to split a node
-    default_config.JVM_MEM = '250G'  #* Maximum memory for the JVM (H2O), wisconsin c220g2.
+    #* If combo size is non-positive, use all combinations
+    default_config.MAX_COMBO_SIZE = 0
+    #* Maximum rounds of remove-and-conquer
+    default_config.MAX_SEPARATE_CONQUER_EPOCHS = 1
+    #* Minimum gain to split a node
+    default_config.MIN_SPLIT_GAIN = 1e-6
+    #* Maximum memory for the JVM (H2O), wisconsin c220g2.
+    default_config.JVM_MEM = '250G'
+    #* Stop learning early if the process uses this fraction of RAM (>1 disables)
+    default_config.MEMORY_STOP_THRESHOLD = 0.9
     
     '''Legacy configuration'''
     # default_config.BASELINE = False
