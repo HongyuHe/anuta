@@ -136,7 +136,7 @@ class TreeLearner(object):
 
 class EntropyTreeLearner(TreeLearner):
     """Tree learner based on information gain, using H2O's implementation."""
-    def __init__(self, constructor: Constructor, limit=None):
+    def __init__(self, constructor: Constructor, limit=None, shuffle=False):
         super().__init__(constructor, limit)
         h2o.init(max_mem_size=FLAGS.config.JVM_MEM, nthreads=-1)  # -1 = use all available cores
         h2o.no_progress()  # Disables all progress bar output
@@ -150,7 +150,9 @@ class EntropyTreeLearner(TreeLearner):
         #             self.examples.drop(columns=col, inplace=True)
         #             self.variables.remove(col)
         #             self.categoricals.remove(col)
-            
+        
+        if shuffle:
+            self.examples = self.examples.sample(frac=1, random_state=42).reset_index(drop=True)
         self.examples: h2o.H2OFrame = h2o.H2OFrame(constructor.df)
         if self.categoricals:
             self.examples[self.categoricals] = self.examples[self.categoricals].asfactor()
@@ -366,6 +368,162 @@ class EntropyTreeLearner(TreeLearner):
         Theory.save_constraints(sprules, outputf)
         h2o.shutdown(prompt=False)
         return
+
+    def classify(self, target: str) -> Tuple[Set[str], Dict[str, Any]]:
+        """
+        Train a single classification tree to predict `target` from all other columns.
+        Returns a tuple of (path_rules, metrics).
+        """
+        self.categoricals.append(target)
+        
+        if target not in self.examples.columns:
+            raise ValueError(f"Unknown target column `{target}`.")
+
+        feature_cols = [col for col in self.examples.columns if col != target]
+        if not feature_cols:
+            raise ValueError("No features available after removing the target column.")
+
+        try:
+            self.examples[target] = self.examples[target].asfactor()
+        except Exception as exc:
+            log.warning(f"Failed to convert {target} to categorical for classification: {exc}")
+
+        train, test = self.examples.split_frame(ratios=[0.8], seed=42)
+        if test.nrows == 0:
+            log.warning("Test split is empty; using the training split for evaluation.")
+            test = train
+
+        params = dict(self.model_configs['classification'])
+        params['model_id'] = f"classify_{target}"
+        clf = H2ORandomForestEstimator(**params)
+        
+        log.info(f"Training classification tree with {len(feature_cols)} features and {train.nrows} training examples.")
+        clf.train(x=feature_cols, y=target, training_frame=train)
+
+        preds = clf.predict(test)
+        pred_labels = preds['predict'].as_data_frame(use_multi_thread=True).iloc[:, 0].astype(str)
+        true_labels = test[target].as_data_frame(use_multi_thread=True).iloc[:, 0].astype(str)
+
+        classes = sorted(set(true_labels.tolist()) | set(pred_labels.tolist()))
+        fpr: Dict[str, float] = {}
+        tpr: Dict[str, float] = {}
+        for cls in classes:
+            tp = int(((pred_labels == cls) & (true_labels == cls)).sum())
+            fp = int(((pred_labels == cls) & (true_labels != cls)).sum())
+            tn = int(((pred_labels != cls) & (true_labels != cls)).sum())
+            fn = int(((pred_labels != cls) & (true_labels == cls)).sum())
+            tpr[cls] = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+            fpr[cls] = fp / (fp + tn) if (fp + tn) > 0 else 0.0
+
+        accuracy = float((pred_labels == true_labels).mean()) if len(true_labels) else 0.0
+        log.info(
+            f"{target} classification metrics: accuracy={accuracy:.3f}, "
+            f"TPR={tpr}, FPR={fpr} (train={train.nrows}, test={test.nrows})"
+        )
+
+        def _conditions_to_premise(conditions: List[str]) -> Optional[str]:
+            merged: Dict[str, Dict[str, Any]] = {}
+            for condition in conditions:
+                varname, op, varval = condition.split('$')
+                varval = eval(varval)
+                bucket = merged.setdefault(varname, {})
+                if op == '∈':
+                    current = bucket.get(op, set(varval))
+                    bucket[op] = current & set(varval)
+                elif op == '∉':
+                    current = bucket.get(op, set())
+                    bucket[op] = current | set(varval)
+                elif op == '>':
+                    if self.dtypes.get(varname) == 'int':
+                        varval = math.floor(varval)
+                    current = bucket.get(op, float('-inf'))
+                    bucket[op] = max(current, varval)
+                elif op == '≤':
+                    if self.dtypes.get(varname) == 'int':
+                        varval = math.ceil(varval)
+                    current = bucket.get(op, float('+inf'))
+                    bucket[op] = min(current, varval)
+
+            predicates: List[str] = []
+            for varname, conds in merged.items():
+                operators = conds.keys()
+                if set(['∈', '∉']) & operators:
+                    assert not set(['≤', '>']) & operators, f"{varname} has mixed {conds=}"
+                    _invals = conds.get('∈', set())
+                    _outvals = conds.get('∉', set())
+                    invals = _invals - _outvals
+                    outvals = _outvals - _invals
+
+                    predicate = ''
+                    for val in invals:
+                        if '@' in varname:
+                            avarname = varname.replace('@', '')
+                            assert val in [0, 1], f"Abstract variable {varname} isn't binary."
+                            predicate += f"{avarname}|" if val == 1 else f"Not({avarname})|"
+                        else:
+                            predicate += f"Eq({varname}, {val})|"
+                    predicate = predicate[:-1]
+                    if len(invals) > 1:
+                        predicate = '( ' + predicate + ' )'
+                    if predicate:
+                        predicates.append(predicate)
+
+                    for val in outvals:
+                        if '@' in varname:
+                            avarname = varname.replace('@', '')
+                            assert val in [0, 1], f"Abstract variable {varname} isn't binary."
+                            predicates.append(f"Not({avarname})" if val == 1 else f"{avarname}")
+                        else:
+                            predicates.append(f"Ne({varname}, {val})")
+                else:
+                    assert set(['≤', '>']) & operators, f"{varname} has no recognized {conds=}"
+                    valmin = conds.get('>', float('-inf'))
+                    valmax = conds.get('≤', float('+inf'))
+                    if valmin > valmax:
+                        log.warning(f"[Conflicting condition]: {varname} {conds}")
+                        continue
+                    if valmin == valmax:
+                        if valmin == 0:
+                            predicates.append(f"Eq({varname}, 0)")
+                        else:
+                            continue
+                    else:
+                        if valmin > float('-inf'):
+                            predicates.append(f"({varname} > {valmin})")
+                        if valmax < float('+inf'):
+                            predicates.append(f"({varname} <= {valmax})")
+
+            return ' & '.join(predicates) if predicates else None
+
+        path_rules: Set[str] = set()
+        tree_paths = self.extract_tree_paths(clf, target)
+        for _, records in tree_paths.items():
+            for record in records:
+                premise = _conditions_to_premise(record['conditions'])
+                if premise:
+                    # path_rules.add(premise)
+                    path_rules.add(f"Not({premise})")
+
+        log.info(f"Extracted {len(path_rules)} classificatioin rules.")
+        
+        #* Save path rules 
+        outputf = f'dt_classify_{self.dataset}_{self.num_examples}'
+        if FLAGS.label:
+            outputf += f"_{FLAGS.label}.pl"
+        else:            
+            outputf += ".pl"
+        sprules = []
+        learned_rules = set(self.prior) | path_rules
+        for rule in tqdm(learned_rules, desc="... Converting path rules to sympy"):   
+            try:
+                sprules.append(sp.sympify(rule))
+            except Exception as e:
+                log.error(f"Failed to sympify rule: {rule}. Skipping.")
+                continue
+        Theory.save_constraints(sprules, outputf)
+        
+        h2o.shutdown(prompt=False)
+        return path_rules, {'accuracy': accuracy, 'tpr': tpr, 'fpr': fpr}
     
     def _cleanup_tree_models(self, targets: Optional[Iterable[str]] = None):
         """Remove tracked H2O models to free JVM memory."""
@@ -737,15 +895,18 @@ class EntropyTreeLearner(TreeLearner):
                 if paths:
                     treepaths[targetcls] = paths
         else:
-            #* Binomial or regression tree
+            '''Binomial or regression tree'''
             paths = []
+            #* For binary classification, H2O defines the “positive” class as the second label 
+            #*  in that lexicographical order (e.g. 1, True, or the second categorical value).
+            targetcls = 1
             try:
                 htree = H2OTree(model=dtree, tree_number=0)
-                recurse(htree.root_node, [], "", 0)
+                recurse(htree.root_node, [], "", targetcls)
             except Exception as e:
                 log.error(f"Failed to extract paths from tree ({target=})")
             if paths:
-                treepaths[0] = paths
+                treepaths[targetcls] = paths
         
         # print(logits)
         return treepaths

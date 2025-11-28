@@ -92,7 +92,16 @@ if __name__ == '__main__':
     if FLAGS.baseline or not FLAGS.dc:
         FLAGS.config.DOMAIN_COUNTING = False
         
-    if FLAGS.learn:
+    if FLAGS.classify:
+        assert FLAGS.tree, "Tree learner must be specified for classification."
+        learner = EntropyTreeLearner(constructor, limit=limit, shuffle=True)
+        path_rules, metrics = learner.classify(FLAGS.target)
+        log.info(f"Classification complete for {FLAGS.target}: accuracy={metrics['accuracy']:.3f}")
+        log.info(f"Per-class TPR: {metrics['tpr']}")
+        log.info(f"Per-class FPR: {metrics['fpr']}")
+        log.info(f"Extracted {len(path_rules)} decision path rules.")
+
+    elif FLAGS.learn:
         refdata = FLAGS.ref
         refconstructor = None
         # if not FLAGS.tree and not FLAGS.assoc:

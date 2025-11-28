@@ -958,10 +958,13 @@ class CiddsAtk(Constructor):
         for col in ['Date first seen', 'Flows']:
             if col in self.df.columns:
                 self.df.drop(columns=[col], inplace=True)
-        col_to_var = {col: to_big_camelcase(col) for col in self.df.columns}
+        col_to_var = {col: to_big_camelcase(col) for col in self.df.columns
+                      if col != FLAGS.target}
         self.df.rename(columns=col_to_var, inplace=True)
         variables = list(self.df.columns)
         self.feature_marker = ''
+        if FLAGS.classify:
+            labels = self.df[FLAGS.target]
         
         #* Convert the Flags and Proto columns to integers        
         self.df['Flags'] = self.df['Flags'].apply(cidds_flag_map)
@@ -976,8 +979,8 @@ class CiddsAtk(Constructor):
         self.categoricals = cidds_categoricals + ['IsBroadcast', 'Tos']
         
         multiconstants: List[Tuple[str, Constants]] = []
-        quantiles = [0.99, 0.95, 0.5]
-        topk = 3
+        quantiles = [0.99, 0.95, 0.75, 0.5, 0.25]
+        topk = 5
         for name in variables:
             if 'ip' in name.lower():
                 multiconstants.append(
@@ -1041,6 +1044,8 @@ class CiddsAtk(Constructor):
                 variables, domains, multiconstants, self.df, drop_identifiers=False)
             self.df = self.df[self.categoricals]
             variables = self.categoricals
+            if FLAGS.classify:
+                self.df[FLAGS.target] = labels
 
         self.anuta = Anuta(variables, domains, constants={}, multiconstants=multiconstants, 
                            prior_kb=prior_rules)

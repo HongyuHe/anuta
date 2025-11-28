@@ -19,6 +19,7 @@ FLAGS = flags.FLAGS
 flags.DEFINE_boolean("learn", False, "Learn constraints from a dataset")
 flags.DEFINE_boolean("validate", False, "Validate a dataset using a learned theory")
 flags.DEFINE_boolean("detect", False, "Detect violations using a learned theory")
+flags.DEFINE_boolean("classify", False, "Train and evaluate a single decision tree classifier for a target column")
 
 #* Configs
 flags.DEFINE_enum("logic", 'denial', ['denial', 'level'], "Logic learning method to use")
@@ -33,6 +34,7 @@ flags.mark_flag_as_required('data')
 flags.DEFINE_string("ref", "", "Path to the reference dataset")
 flags.DEFINE_string("rules", "", "Path to the learned rules")
 flags.DEFINE_boolean("baseline", False, "Use the baseline method Valiant algorithm")
+flags.DEFINE_string("target", "label", "Target column to classify when using -classify")
 #* Use `-nodc` to disable domain counting
 flags.DEFINE_boolean("dc", True, "Enable domain counting")
 flags.DEFINE_integer("cores", None, "Maximum number of cores allowed to use")
