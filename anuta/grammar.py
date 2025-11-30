@@ -96,7 +96,8 @@ TYPE_DOMIAN = {
     VariableType.CONNECTION: DomainType.INTEGER,
     VariableType.INTERARRIVAL: DomainType.INTEGER,
     VariableType.TOS: DomainType.CATEGORICAL,
-    VariableType.UNKNOWN: "unknown"
+    #! Default to categorical for unknown types.
+    VariableType.UNKNOWN: DomainType.CATEGORICAL,
 }
 
 

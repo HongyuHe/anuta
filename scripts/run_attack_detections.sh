@@ -2,16 +2,16 @@
 
 set -euo pipefail
 
-RULES_PATH="rules/dt_cidds_all_e1_norm_wk12.pl"
+RULES_PATH="dt_cidds_all_e1_norm_wk12_portcls_tos.pl"
 DATASET="cidds"
 
 attack_files=(
-  "data/cidds_intl_bruteForce.csv"
-  "data/cidds_intl_dos.csv"
-  "data/cidds_intl_pingScan.csv"
-  "data/cidds_intl_portScan.csv"
-  "data/cidds_wk3_full.csv"
-  "data/cidds_wk4_full.csv"
+  "data/attacks/cidds_intl_bruteForce.csv"
+  "data/attacks/cidds_intl_dos.csv"
+  "data/attacks/cidds_intl_portScan.csv"
+  "data/attacks/cidds_intl_pingScan.csv"
+  "/mnt/ann/hy/data/cidds_wk3_full.csv"
+  "/mnt/ann/hy/data/cidds_wk4_full.csv"
 )
 
 for attack_file in "${attack_files[@]}"; do

@@ -237,6 +237,9 @@ class Constructor(object):
         for j, var1 in enumerate(variables):
             vtype1 = variable_types[var1]
             domaintype1 = TYPE_DOMIAN[vtype1]
+            if vtype1 == VariableType.UNKNOWN:
+                #* Skip unknown variable types.
+                continue
             
             for var2 in abstractvars[j+1:]:
                 if var1 == var2: continue
@@ -375,7 +378,9 @@ class Constructor(object):
                 prior_rules.add(f"({varname}>={bounds.lb})")
                 prior_rules.add(f"({varname}<={bounds.ub})")
                 
-            elif domaintype == DomainType.CATEGORICAL:
+            elif domaintype == DomainType.CATEGORICAL and varname != FLAGS.target:
+                assert domains[varname].values is not None, (
+                        f"Categorical variable {varname} must have defined domain values.")
                 prior_rules.add(f"{varname}>=0")
                 prior_rules.add(f"{varname}<={max(domains[varname].values)}")
                 
@@ -961,7 +966,6 @@ class CiddsAtk(Constructor):
         col_to_var = {col: to_big_camelcase(col) for col in self.df.columns
                       if col != FLAGS.target}
         self.df.rename(columns=col_to_var, inplace=True)
-        variables = list(self.df.columns)
         self.feature_marker = ''
         if FLAGS.classify:
             labels = self.df[FLAGS.target]
@@ -978,6 +982,7 @@ class CiddsAtk(Constructor):
             self.df['Tos'] = self.df['Tos'].apply(cidds_tos_map)
         self.categoricals = cidds_categoricals + ['IsBroadcast', 'Tos']
         
+        variables = list(self.df.columns)
         multiconstants: List[Tuple[str, Constants]] = []
         quantiles = [0.99, 0.95, 0.75, 0.5, 0.25]
         topk = 5

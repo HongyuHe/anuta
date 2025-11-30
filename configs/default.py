@@ -27,13 +27,13 @@ def get_config():
     default_config.MIN_SPLIT_GAIN = 1e-6
     #* Maximum memory for the JVM (H2O), wisconsin c220g2.
     default_config.JVM_MEM = '250G'
-    #* Stop learning early if the process uses this fraction of RAM (>1 disables)
-    default_config.MEMORY_STOP_THRESHOLD = 0.9
+    # #* Stop learning early if the process uses this fraction of RAM (>1 disables)
+    # default_config.MEMORY_STOP_THRESHOLD = 0.9
     
-    '''Legacy configuration'''
-    # default_config.BASELINE = False
-    default_config.ARITY_LIMIT = 3
-    default_config.DOMAIN_COUNTING = True
-    default_config.OUTPUT_DIR = "./"
+    # '''Legacy configuration'''
+    # # default_config.BASELINE = False
+    # default_config.ARITY_LIMIT = 3
+    # default_config.DOMAIN_COUNTING = True
+    # default_config.OUTPUT_DIR = "./"
 
     return default_config

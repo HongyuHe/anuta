@@ -31,7 +31,10 @@ known_ports = [
     995,  # POP3S
     8080 # Alternative HTTP
 ]
-UNKNOWN_PORT = 60_000  # Default value for unknown ports
+UNKNOWN_PORT = 80_000  # Default value for unknown ports
+WELLKNOWN_PORT = 70_000
+REGISTERED_PORT = 71_000
+DYNAMIC_PORT = 72_000
 
 def tcpflags2hex(dot_flags: str) -> str:
     """
@@ -93,8 +96,7 @@ def hex2tcpflags(bitmask) -> str:
     """
     if isinstance(bitmask, str):
         bitmask = int(bitmask, base=16)
-    elif isinstance(bitmask, int):
-        hex
+        
     if bitmask < 0: return ""
     
     #* Define TCP flags and their corresponding bit positions
@@ -249,11 +251,27 @@ cidds_constants = {
     'bytes': [1],
 }
 
-def cidds_port_map(port):
-    if port not in set(cidds_ports) | set(known_ports):
-        return UNKNOWN_PORT
-    else:
+def cidds_port_map(port: int):
+    # if port not in set(cidds_ports) | set(known_ports):
+    #     return UNKNOWN_PORT
+    # else:
+    #     return port
+    assert isinstance(port, int), f"Port must be an integer, got {type(port)}"
+    assert port >= 0 and port <= 65535, f"Port must be in range 0-65535, got {port}"
+    
+    if port in set(cidds_ports) | set(known_ports):
         return port
+    elif port <= 1023:
+        #* Well-known ports
+        return WELLKNOWN_PORT
+    elif 1024 <= port <= 49151:
+        #* Registered ports
+        return REGISTERED_PORT
+    elif port >= 49152:
+        #* Dynamic/private ports
+        return DYNAMIC_PORT
+    else:
+        raise ValueError(f"Invalid port number: {port}")
     
 def cidds_proto_map(proto: str):
 	return cidds_proto_conversion[proto]
@@ -276,9 +294,6 @@ def cidds_subnet_map(ip: str):
         ]
         ipnum = subnet
     return ipnum
-
-cidds_subnets = [000, 100, 200, 210, 220, 666, 888]
-cidds_tos_values = [0, 8, 48,  32, 192,  16]
 
 def cidds_isboradcast_map(ip: str):
     if '.255' in ip:
@@ -341,6 +356,11 @@ def cidds_flag_map(flag: str):
     #     new_flag = cidds_flags_conversion.inverse[1]
     
     # return cidds_flags_conversion[new_flag]
+
+cidds_subnets = [000, 100, 200, 210, 220, 666, 888]
+#* DSCP values (CIDDS-001 does not use ECN, the lower 2 bits)
+cidds_tos_values = [0, 3, 4, 8, 48]
+
 #******************** CIDDS-001 Domain Knowledge ends ********************
 
 pcap_field_translation = {

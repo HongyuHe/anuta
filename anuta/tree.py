@@ -507,7 +507,7 @@ class EntropyTreeLearner(TreeLearner):
         log.info(f"Extracted {len(path_rules)} classificatioin rules.")
         
         #* Save path rules 
-        outputf = f'dt_classify_{self.dataset}_{self.num_examples}'
+        outputf = f'dt_{self.dataset}_classify_{self.num_examples}'
         if FLAGS.label:
             outputf += f"_{FLAGS.label}.pl"
         else:            
@@ -897,9 +897,8 @@ class EntropyTreeLearner(TreeLearner):
         else:
             '''Binomial or regression tree'''
             paths = []
-            #* For binary classification, H2O defines the “positive” class as the second label 
-            #*  in that lexicographical order (e.g. 1, True, or the second categorical value).
-            targetcls = 1
+            #* For binary classification, H2O predicts class 0 logits by default.
+            targetcls = 0
             try:
                 htree = H2OTree(model=dtree, tree_number=0)
                 recurse(htree.root_node, [], "", targetcls)

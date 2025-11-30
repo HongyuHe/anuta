@@ -145,7 +145,7 @@ if __name__ == '__main__':
         rule_vio_rate, sample_vio_rate = validator(constructor, rules, label)
         violation_record = ','.join([data_label, str(rule_label), str(rule_vio_rate), str(sample_vio_rate)])
         #TODO: Specify all file names in the config file.
-        violation_file = f"violation_records.csv"
+        violation_file = f"validation_records.csv"
         if Path(violation_file).exists():
             with open(violation_file, 'a') as f:
                 f.write(violation_record + '\n')
