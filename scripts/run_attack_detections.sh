@@ -2,15 +2,15 @@
 
 set -euo pipefail
 
-RULES_PATH="dt_cidds_all_e1_norm_wk12_portcls_tos.pl"
+RULES_PATH="dt_cidds_all_e1_norm_wk12_portcls_succinct.pl"
 DATASET="cidds"
 
 attack_files=(
+  "/mnt/ann/hy/data/cidds_wk3_full.csv"
   "data/attacks/cidds_intl_bruteForce.csv"
   "data/attacks/cidds_intl_dos.csv"
   "data/attacks/cidds_intl_portScan.csv"
   "data/attacks/cidds_intl_pingScan.csv"
-  "/mnt/ann/hy/data/cidds_wk3_full.csv"
   "/mnt/ann/hy/data/cidds_wk4_full.csv"
 )
 

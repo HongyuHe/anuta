@@ -473,11 +473,46 @@ class Yatesbury(Constructor):
         
         self.df['SrcIp'] = self.df['SrcIp'].apply(yatesbury_ip_map)
         self.df['DstIp'] = self.df['DstIp'].apply(yatesbury_ip_map)
+        self.df['SrcPt'] = self.df['SrcPt'].apply(cidds_port_map)
+        self.df['DstPt'] = self.df['DstPt'].apply(cidds_port_map)
         self.df['FlowDir'] = self.df['FlowDir'].apply(yatesbury_direction_map)
         self.df['Proto'] = self.df['Proto'].apply(yatesbury_proto_map)
         # self.df['Decision'] = self.df['Decision'].apply(yatesbury_decision_map)
         self.df['FlowState'] = self.df['FlowState'].apply(yatesbury_flowstate_map)
         self.df = self.df.astype(int)
+        
+        variables = list(self.df.columns)
+        multiconstants: List[Tuple[str, Constants]] = []
+        quantiles = [0.99, 0.95, 0.75, 0.5, 0.25]
+        topk = 5
+        for name in variables:
+            if 'ip' in name.lower():
+                multiconstants.append(
+                    (name, Constants(kind=ConstantType.ASSIGNMENT, values=set(self.df.SrcIp.unique()) | 
+                                                                    set(self.df.DstIp.unique())))
+                )
+            if 'pt' in name.lower():
+                multiconstants.append(
+                    (name, Constants(kind=ConstantType.ASSIGNMENT, values=cidds_ports))
+                )
+            if 'pkt' in name.lower():
+                quantiles_values = get_quantiles(self.df[name], quantiles)
+                multiconstants.append(
+                    (name, Constants(kind=ConstantType.LIMIT, values=quantiles_values))
+                )
+                top_packets = self.df[name].value_counts().nlargest(topk).index.tolist()
+                multiconstants.append(
+                    (name, Constants(kind=ConstantType.ASSIGNMENT, values=top_packets))
+                )
+            if 'bytes' in name.lower():
+                quatiles = get_quantiles(self.df[name], quantiles)
+                multiconstants.append(
+                    (name, Constants(kind=ConstantType.LIMIT, values=quatiles))
+                )
+                top_bytes = self.df[name].value_counts().nlargest(topk).index.tolist()
+                multiconstants.append(
+                    (name, Constants(kind=ConstantType.ASSIGNMENT, values=top_bytes))
+                )
         
         domains = {}
         for name in self.df.columns:
@@ -496,7 +531,18 @@ class Yatesbury(Constructor):
                 domains[name] = Domain(DomainType.CATEGORICAL, 
                                        None, 
                                        self.df[name].unique().tolist())
-        self.anuta = Anuta(list(self.df.columns), domains, constants={})
+
+        prior_rules: Set[str] = set()
+        if FLAGS.assoc or FLAGS.tree:
+            variables, self.categoricals, prior_rules, self.df = self.build_abstract_domain(
+                variables, domains, multiconstants, self.df, drop_identifiers=False)
+            self.df = self.df[self.categoricals]
+            variables = self.categoricals
+            # if FLAGS.classify:
+            #     self.df[FLAGS.target] = labels
+
+        self.anuta = Anuta(variables, domains, constants={}, multiconstants=multiconstants, 
+                           prior_kb=prior_rules)
         
         return
 
@@ -1237,12 +1283,11 @@ class Millisampler(Constructor):
         for col in self.df.columns:
             if col in todrop:
                 self.df.drop(columns=[col], inplace=True)
-        self.df = self.df.iloc[:, :-50]
         variables = list(self.df.columns)
         self.colvars = {var: {var} for var in variables}
         #* All variables are numerical, so we don't need to specify categoricals.
         self.categoricals = []
-        self.feature_marker = 'Ctx'
+        self.feature_marker = 'Agg' # 'Ctx'
         
         # #! Remove fine-grained measurements for now.
         # todrop = [col for col in self.df.columns if self.feature_marker not in col]

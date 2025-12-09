@@ -20,7 +20,7 @@ def get_config():
     
     '''Tree leaning configuration'''
     #* If combo size is non-positive, use all combinations
-    default_config.MAX_COMBO_SIZE = 1
+    default_config.MAX_COMBO_SIZE = 0
     #* Maximum rounds of remove-and-conquer
     default_config.MAX_SEPARATE_CONQUER_EPOCHS = 1
     #* Minimum gain to split a node

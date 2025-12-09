@@ -126,8 +126,8 @@ yatesbury_direction_conversion = bidict({direction: i for i, direction in enumer
 yatesbury_proto_conversion = bidict({proto: i for i, proto in enumerate(['T', 'U'])})
 yatesbury_decision_conversion = bidict({decision: i for i, decision in enumerate(['A', 'D'])})
 yatesbury_flowstate_conversion = bidict({state: i for i, state in enumerate(['B', 'C', 'E'])})
-#* Taking into account every port for now.
-yatesbury_port_conversion = bidict({port: port for port in range(1, 65536)})
+# #* Taking into account every port for now.
+# yatesbury_port_conversion = bidict({port: port for port in range(1, 65536)})
 
 def yatesbury_direction_map(direction: str):
     if direction in yatesbury_direction_conversion:
@@ -227,6 +227,7 @@ cidds_ips = ['private_p2p', 'private_broadcast', '0.0.0.0', 'public_p2p', 'dns']
 #             #    8000, #* Seafile Server
 #                53, 67, 68, 80, 123, 137, 138, 443, 993, 8080]
 cidds_ports = [0, 514, 515, 3, 389, 135, 137, 138, 139, 8, 11, 143, 8080, 8082, 20, 21, 22, 23, 25, 161, 548, 37, 554, 43, 49, 179, 53, 1080, 443, 445, 8000, 67, 68, 70, 587, 79, 80, 465, 88, 990, 993, 995, 631, 873, 5353, 110, 111, 119, 123, 636]
+cidds_ports += [WELLKNOWN_PORT, REGISTERED_PORT, DYNAMIC_PORT]
 cidds_ints = ['Packets', 'Bytes', 'Flows'] + cidds_categoricals
 cidds_floats = ['Duration']
 

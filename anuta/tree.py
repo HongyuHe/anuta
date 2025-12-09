@@ -345,7 +345,7 @@ class EntropyTreeLearner(TreeLearner):
         self.learned_rules = self._merge_rules_by_premise(self.learned_rules)
         log.info(f"Merged learned rules: {before_merge} -> {len(self.learned_rules)}")
         
-        assumptions = self.prior
+        assumptions = set(self.prior)
         rules = self.learned_rules | assumptions
         sprules = []
         
@@ -1080,17 +1080,17 @@ class XgboostTreeLearner(TreeLearner):
                             outvals = _outvals - _invals
                             domain = set(self.domains[varname])
 
-                            #* Use the most succinct representation
-                            if invals:
-                                diffvals = domain - invals
-                                if len(diffvals) < len(invals):
-                                    outvals |= diffvals
-                                    invals = set()
-                            if outvals:
-                                diffvals = domain - outvals
-                                if len(diffvals) < len(outvals):
-                                    invals |= diffvals
-                                    outvals = set()
+                            # #* Use the most succinct representation
+                            # if invals:
+                            #     diffvals = domain - invals
+                            #     if len(diffvals) < len(invals):
+                            #         outvals |= diffvals
+                            #         invals = set()
+                            # if outvals:
+                            #     diffvals = domain - outvals
+                            #     if len(diffvals) < len(outvals):
+                            #         invals |= diffvals
+                            #         outvals = set()
 
                             predicate = ''
                             for val in invals:
