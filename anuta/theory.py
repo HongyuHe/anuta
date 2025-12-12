@@ -502,15 +502,38 @@ class Theory(object):
             if not isinstance(varval, int):
                 return varval
             
+            subnet_labels = {
+                0: '0.0.0.0',
+                100: 'server-net',
+                200: 'mgmt-net',
+                210: 'office-net',
+                220: 'dev-net',
+                666: 'public',
+                888: 'DNS',
+            }
             if 'Ip' in varname:
-                value = cidds_ip_conversion.inverse[varval]
+                value = subnet_labels.get(varval, varval)
             elif 'Flags' in varname:
-                value = cidds_flags_conversion.inverse[varval]
-                # value = hex2tcpflags(varval)
+                try:
+                    value = hex2dotflags(varval)
+                except Exception:
+                    value = hex2tcpflags(varval)
             elif 'Proto' in varname:
-                value = cidds_proto_conversion.inverse[varval]
+                try:
+                    value = PROTOS[varval]
+                except Exception:
+                    value = varval
             elif 'Pt' in varname:
-                value = 'unknown_port' if varval == UNKNOWN_PORT else varval
+                if varval == UNKNOWN_PORT:
+                    value = 'unknown'
+                elif varval == WELLKNOWN_PORT:
+                    value = 'wellknown'
+                elif varval == REGISTERED_PORT:
+                    value = 'registered'
+                elif varval == DYNAMIC_PORT:
+                    value = 'dynamic'
+                else:
+                    value = varval
             else:
                 value = varval
             return value
@@ -619,10 +642,10 @@ class Theory(object):
         interpreted_filtered = []
         translated_filtered = []
         # for rule in interpreted:
-        #     if 'unknown_port' not in rule:
+        #     if 'unknown' not in rule:
         #         interpreted_filtered.append(rule)
         # for rule in translated:
-        #     if 'unknown_port' not in rule:
+        #     if 'unknown' not in rule:
         #         translated_filtered.append(rule)
         # interpreted = interpreted_filtered
         # translated = translated_filtered
