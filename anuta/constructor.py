@@ -1118,9 +1118,9 @@ class Cidds001(Constructor):
         
         #* Convert the Flags and Proto columns to integers        
         self.df['Flags'] = self.df['Flags'].apply(cidds_flag_map)
-        self.df['Proto'] = self.df['Proto'].apply(cidds_proto_map)
-        self.df['SrcIpAddr'] = self.df['SrcIpAddr'].apply(cidds_ip_map)
-        self.df['DstIpAddr'] = self.df['DstIpAddr'].apply(cidds_ip_map)
+        self.df['Proto'] = self.df['Proto'].apply(proto_map)
+        self.df['SrcIpAddr'] = self.df['SrcIpAddr'].apply(cidds_subnet_map)
+        self.df['DstIpAddr'] = self.df['DstIpAddr'].apply(cidds_subnet_map)
         self.df['SrcPt'] = self.df['SrcPt'].apply(cidds_port_map)
         self.df['DstPt'] = self.df['DstPt'].apply(cidds_port_map)
         self.categoricals = cidds_categoricals

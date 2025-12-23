@@ -19,8 +19,8 @@ def possitive_cases() -> List[Dict[str, str]]:
 @pytest.fixture
 def negative_cases() -> List[Dict[str, str]]:
     """Fixture to load the queries from the JSON file."""
-    # path = "tests/queries/cidds_queries.json"
-    path = "tests/queries/cidds_benchmark_neg.json"
+    path = "tests/queries/cidds_queries.json"
+    # path = "tests/queries/cidds_benchmark_neg.json"
     with open(path, 'r') as f:
         return json.load(f)
 
@@ -38,7 +38,9 @@ def theory() -> Theory:
     # modelpath = 'dt_cidds_1000.pl'
     # modelpath = 'dt_cidds_10000.pl'
     # modelpath = 'dt_cidds_netshare.pl'
-    modelpath = 'denial_cidds_all_p3.pl'
+    # modelpath = 'denial_cidds_all_p3.pl'
+    # modelpath = '/home/hongyu/anuta/dt_cidds_all_e1_norm_wk12_combo1_5pred.pl'
+    modelpath = '/home/hongyu/anuta/denial_cidds_5000000_p8_norm.pl'
     # modelpath = 'hmine_cidds_all.pl'
     # modelpath = 'xgb_cidds_all.pl'
     # modelpath = 'lgbm_cidds_all.pl'

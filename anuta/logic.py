@@ -471,7 +471,7 @@ class LogicLearner(object):
         Enumerate all minimal hitting sets H such that ∀E in evidence_sets: H ∩ E ≠ ∅.
         
         Iterative stack-based DFS (no recursion).
-        Enforces variable-disjointness: predicates in a hitting set cannot share variables.
+        Prunes branches whose disjunction is tautological (e.g., conflicting Ne or complementary bounds).
         """
         if not evidence_sets:
             return []
@@ -494,15 +494,76 @@ class LogicLearner(object):
         # All evidence sets that must be covered (all of them, since empty_esets is 0)
         FULL = set(range(len(evidence_sets)))
 
-        #* --- PERFORMANCE FIX (use set for solutions) ---
-        global_solutions: Set[FrozenSet[Constraint]] = set()
+        #* --- PERFORMANCE FIX (bitmask-based minimality tracking) ---
+        pred_list: List[Constraint] = list(idx_by_pred.keys())
+        pred_to_bit: Dict[Constraint, int] = {p: i for i, p in enumerate(pred_list)}
+        global_solution_masks: Set[int] = set()
+        masks_by_bit: Dict[int, Set[int]] = defaultdict(set)
 
-        def _dominated_by_existing(fc: FrozenSet[Constraint]) -> bool:
-            """Checks if a new candidate frozenset is a superset of any existing solution."""
-            for sol in global_solutions:
-                if sol.issubset(fc):  # fc is a superset of an existing solution
+        def _bits_from_mask(mask: int) -> List[int]:
+            bits: List[int] = []
+            bit = 0
+            m = mask
+            while m:
+                if m & 1:
+                    bits.append(bit)
+                bit += 1
+                m >>= 1
+            return bits
+
+        def _mask_for(preds: Set[Constraint]) -> int:
+            mask = 0
+            for p in preds:
+                mask |= 1 << pred_to_bit[p]
+            return mask
+
+        def _has_subset(mask: int) -> bool:
+            """
+            Returns True if any existing solution is a subset of the candidate mask.
+            Enumerates submasks of mask; bounded by solution size (max_size).
+            """
+            submask = mask
+            while submask:
+                if submask in global_solution_masks:
                     return True
+                #* A bit-manipulation idiom to iterate over all combinations of bits in mask.
+                #*  For example, if mask = 0b1101, submasks will be: {1101,1100,1001,1000,0101,0100,0001}
+                submask = (submask - 1) & mask
             return False
+
+        def _add_solution(mask: int) -> bool:
+            """
+            Adds mask as a new minimal solution if not dominated.
+            Removes supersets using per-bit indexes to avoid scanning all solutions.
+            Returns True if added.
+            """
+            if _has_subset(mask):
+                #* Check if any subsets of the selected predicates (stronger rule) 
+                #*  already exist as solutions.
+                return False
+
+            bits = _bits_from_mask(mask)
+            #* Check if any supersets (weaker rule) of the newly found rule exist.
+            superset_candidates: Optional[Set[int]] = None
+            for b in bits:
+                superset_masks = masks_by_bit.get(b, set())
+                if superset_candidates is None:
+                    superset_candidates = set(superset_masks)
+                else:
+                    superset_candidates &= superset_masks
+                if superset_candidates is not None and not superset_candidates:
+                    break
+
+            if superset_candidates:
+                for sup in superset_candidates:
+                    global_solution_masks.discard(sup)
+                    for b in _bits_from_mask(sup):
+                        masks_by_bit[b].discard(sup)
+
+            global_solution_masks.add(mask)
+            for b in bits:
+                masks_by_bit[b].add(mask)
+            return True
 
         def _optimistic_lb(uncovered: Set[int]) -> int:
             """Calculates a simple greedy lower bound on the number of predicates needed."""
@@ -528,61 +589,111 @@ class LogicLearner(object):
                 if deg < best_deg:
                     best_deg, best_i = deg, i
             return best_i
-        
-        # This new function REPLACES _pick_pivot
-        def _get_feasible_candidates(
-            uncovered: Set[int], 
-            chosen_vars: Set[str]
-        ) -> Optional[List[Constraint]]:
+
+        #* --- Tautology-aware candidate filtering ---
+        def _extract_signature(p: Constraint) -> Optional[Tuple[str, str, Any, bool]]:
             """
-            Finds the uncovered set with the *smallest* number of feasible candidates.
-            
-            - A candidate is "feasible" if it's disjoint from chosen_vars.
-            - If any uncovered set has 0 feasible candidates, this is a dead branch,
-            so we return None to signal an immediate backtrack.
-            - Otherwise, returns the sorted list of feasible candidates from the 
-            best pivot set (smallest branching factor).
+            Returns (var, kind, rhs, inclusive) where kind in {'eq','ne','lower','upper'}.
+            Only defined for single-variable predicates; otherwise returns None.
             """
-            best_candidates_list: Optional[List[Constraint]] = None
-            best_deg = float('inf')
+            expr = p.expr
+            if len(expr.free_symbols) != 1:
+                return None
+            var = str(next(iter(expr.free_symbols)))
+            rhs = expr.args[1]
+            if isinstance(expr, sp.Eq):
+                return var, "eq", rhs, True
+            if isinstance(expr, sp.Ne):
+                return var, "ne", rhs, False
+            if isinstance(expr, sp.StrictGreaterThan):
+                return var, "lower", rhs, False
+            if isinstance(expr, sp.GreaterThan):
+                return var, "lower", rhs, True
+            if isinstance(expr, sp.StrictLessThan):
+                return var, "upper", rhs, False
+            if isinstance(expr, sp.LessThan):
+                return var, "upper", rhs, True
+            return None
 
-            for i in uncovered:
-                feasible_candidates_for_i = []
-                for p in evidence_sets[i]:
-                    # The disjointness check
-                    if not any(str(v) in chosen_vars for v in p.expr.free_symbols):
-                        feasible_candidates_for_i.append(p)
-                
-                feasible_degree = len(feasible_candidates_for_i)
+        def _interval_covers_all(lower_val, lower_inc: bool, upper_val, upper_inc: bool) -> bool:
+            """
+            True if lower/upper bounds together cover the full line (their disjunction is tautology).
+            """
+            try:
+                if upper_val > lower_val:
+                    return True
+                if upper_val == lower_val:
+                    return lower_inc or upper_inc
+            except Exception:
+                return False
+            return False
 
-                #* --- PRUNING ---
-                # If an uncovered set has 0 feasible candidates, this entire
-                # search branch is impossible. Prune it immediately.
-                if feasible_degree == 0:
-                    return None  # Signal to backtrack
+        def _is_tautological_with(chosen_info: Dict[str, Dict[str, Any]], p: Constraint) -> bool:
+            sig = _extract_signature(p)
+            if not sig:
+                return False
+            var, kind, rhs, inclusive = sig
+            info = chosen_info.get(var)
+            if not info:
+                return False
 
-                # This is a better pivot; store its candidates
-                if feasible_degree < best_deg:
-                    best_deg = feasible_degree
-                    best_candidates_list = feasible_candidates_for_i
-            
-            # If best_candidates_list is still None, something went wrong
-            # (e.g., uncovered was empty, but that's checked earlier)
-            if best_candidates_list is None:
-                log.error("No feasible candidates found, but uncovered is not empty.")
-                return [] # Should not happen if uncovered is not empty
-                
-            #* --- SORTING ---
-            # Sort the best list by "gain" to explore most promising branches first.
-            # This was previously done in the main loop.
-            best_candidates_list.sort(key=lambda p: -len(idx_by_pred[p] & uncovered))
-            
-            return best_candidates_list
+            if kind == "eq":
+                return rhs in info["ne"]
+
+            if kind == "ne":
+                if rhs in info["eq"]:
+                    return True
+                #* Any additional Ne on the same variable makes OR tautological.
+                #*  E.g., Ne(X, x1) ∨ Ne(X, x2) is always true for any X.
+                return bool(info["ne"])
+
+            if kind == "lower":
+                for ub, uinc in info["upper"]:
+                    if _interval_covers_all(rhs, inclusive, ub, uinc):
+                        return True
+                return False
+
+            if kind == "upper":
+                for lb, linc in info["lower"]:
+                    if _interval_covers_all(lb, linc, rhs, inclusive):
+                        return True
+                return False
+
+            return False
+
+        def _extend_chosen_info(chosen_info: Dict[str, Dict[str, Any]], p: Constraint) -> Dict[str, Dict[str, Any]]:
+            sig = _extract_signature(p)
+            if not sig:
+                return chosen_info
+            var, kind, rhs, inclusive = sig
+            new_info = dict(chosen_info)
+            var_info = new_info.get(var)
+            if var_info is None:
+                var_info = {"eq": set(), "ne": set(), "lower": [], "upper": []}
+            else:
+                var_info = {
+                    "eq": set(var_info["eq"]),
+                    "ne": set(var_info["ne"]),
+                    "lower": list(var_info["lower"]),
+                    "upper": list(var_info["upper"]),
+                }
+
+            if kind == "eq":
+                var_info["eq"].add(rhs)
+            elif kind == "ne":
+                var_info["ne"].add(rhs)
+            elif kind == "lower":
+                var_info["lower"].append((rhs, inclusive))
+            elif kind == "upper":
+                var_info["upper"].append((rhs, inclusive))
+
+            new_info[var] = var_info
+            return new_info
 
         def run_search():
-            solutions_this_run: Set[FrozenSet[Constraint]] = set()
-            stack = [(set(), set(), FULL, set(), None, 0)]  
-            # frame: (chosen, covered, uncovered, chosen_vars, candidates, next_idx)
+            solutions_this_run = 0
+            stack = [(set(), set(), FULL, {}, None, 0)]  
+            # frame: (chosen, covered, uncovered, chosen_info, candidates, next_idx)
 
             start_time = perf_counter()
             last_solution_time = perf_counter()
@@ -598,22 +709,17 @@ class LogicLearner(object):
                     log.warning(f"Search stalled for {cfg.STALL_TIMEOUT_SEC//60}min. Stopping.")
                     break
 
-                chosen, covered, uncovered, chosen_vars, candidates, next_idx = stack.pop()
+                chosen, covered, uncovered, chosen_info, candidates, next_idx = stack.pop()
 
                 #* --- SOLUTION FOUND (Optimized) ---
                 if not uncovered:
-                    fc = frozenset(chosen)
-                    if not _dominated_by_existing(fc):
-                        # Prune global supersets efficiently
-                        supersets = {s for s in global_solutions if fc.issubset(s)}
-                        global_solutions.difference_update(supersets)
-                        global_solutions.add(fc)
-
-                        solutions_this_run.add(fc)
+                    mask = _mask_for(chosen)
+                    if _add_solution(mask):
+                        solutions_this_run += 1
                         last_solution_time = perf_counter()
                         progress.update(1)
                         
-                        if max_solutions and len(solutions_this_run) >= max_solutions:
+                        if max_solutions and solutions_this_run >= max_solutions:
                             return  # Stop this search run
                     continue
 
@@ -633,26 +739,11 @@ class LogicLearner(object):
                     #* --- PERFORMANCE FIX (simplified list comprehension) ---
                     candidates = [
                         p for p in evidence_sets[pivot]
-                        if not any(str(v) in chosen_vars for v in p.expr.free_symbols)
+                        if not _is_tautological_with(chosen_info, p)
                     ]
                     # Sort candidates to explore most promising branches first
                     candidates = sorted(candidates, key=lambda p: -len(idx_by_pred[p] & uncovered))
                     next_idx = 0
-                
-                # #* --- CANDIDATE GENERATION (MODIFIED) ---
-                # if candidates is None:
-                    
-                #     # This one call does pivot selection, disjointness checks,
-                #     # pruning, candidate generation, and sorting.
-                #     candidates = _get_feasible_candidates(uncovered, chosen_vars)
-                    
-                #     #* --- PRUNING ---
-                #     # This branch is impossible (an uncovered set has 0 feasible
-                #     # candidates). Backtrack immediately.
-                #     if candidates is None:
-                #         continue
-                    
-                #     next_idx = 0
 
                 # Backtracking: exhausted all candidates for this pivot
                 if next_idx >= len(candidates):
@@ -660,7 +751,7 @@ class LogicLearner(object):
 
                 #* --- STACK PUSH (Branch 1: "Don't choose p") ---
                 # This state explores solutions *without* candidates[next_idx]
-                stack.append((chosen, covered, uncovered, chosen_vars, candidates, next_idx + 1))
+                stack.append((chosen, covered, uncovered, chosen_info, candidates, next_idx + 1))
 
                 #* --- STACK PUSH (Branch 2: "Choose p") ---
                 p = candidates[next_idx]
@@ -669,16 +760,11 @@ class LogicLearner(object):
                 new_chosen = set(chosen)
                 new_chosen.add(p)
                 
-                # # Prune if this new partial solution is already dominated
-                # fc_partial = frozenset(new_chosen)
-                # if _dominated_by_existing(fc_partial):
-                #     continue
-                
                 new_covered = covered | idx_by_pred[p]
-                new_vars = chosen_vars | {str(v) for v in p.expr.free_symbols}
+                new_info = _extend_chosen_info(chosen_info, p)
                 new_uncovered = uncovered - idx_by_pred[p]
                 
-                stack.append((new_chosen, new_covered, new_uncovered, new_vars, None, 0))
+                stack.append((new_chosen, new_covered, new_uncovered, new_info, None, 0))
 
         progress = tqdm(desc=f"... Enumerating hitting sets (max_size={max_size})",
                         unit=" sets", total=max_solutions)
@@ -690,8 +776,12 @@ class LogicLearner(object):
         finally:
             progress.close()  # Ensure progress bar is always closed
 
-        # Convert final set of frozensets to the required List[Set]
-        return [set(s) for s in global_solutions]
+        # Convert final solution masks to List[Set[Constraint]]
+        solutions: List[Set[Constraint]] = []
+        for mask in global_solution_masks:
+            pred_set = {pred_list[i] for i in _bits_from_mask(mask)}
+            solutions.append(pred_set)
+        return solutions
 
         
     def enumerate_minimal_hitting_sets_suppression(
@@ -1245,8 +1335,9 @@ class LogicLearner(object):
         # Pre-pack predicates into a list so all workers use same reference
         evidence_sets: List[Set[Constraint]] = []
         #* First check if the evidence sets file exists, if so, load it.
-        evidence_sets_file = f'data/evidence_sets_{self.dataset}_{self.num_examples}_{FLAGS.label}.pkl' \
-            if FLAGS.label else  f'data/evidence_sets_{self.dataset}_{self.num_examples}.pkl'
+        data_dir = FLAGS.config.DATA_DIR
+        evidence_sets_file = f'{data_dir}/evidence_sets_{self.dataset}_{self.num_examples}_{FLAGS.label}.pkl' \
+            if FLAGS.label else  f'{data_dir}/evidence_sets_{self.dataset}_{self.num_examples}.pkl'
         if Path(evidence_sets_file).exists():
             log.info(f"Loading evidence sets from {evidence_sets_file}...")
             with open(evidence_sets_file, 'rb') as f:
@@ -1310,6 +1401,9 @@ class LogicLearner(object):
             else:
                 for i in tqdm(range(len(results)), desc="... Merging evidence sets"):
                     results[i] = results[i].union(evidence_sets[i])
+        
+        evidence_sets_file = f'./data/evidence_sets_{self.dataset}_{self.num_examples}_{FLAGS.label}.pkl' \
+            if FLAGS.label else  f'./data/evidence_sets_{self.dataset}_{self.num_examples}.pkl'
         if save:
             with open(evidence_sets_file, 'wb') as f:
                 pickle.dump(results, f)

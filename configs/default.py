@@ -35,5 +35,7 @@ def get_config():
     # default_config.ARITY_LIMIT = 3
     # default_config.DOMAIN_COUNTING = True
     # default_config.OUTPUT_DIR = "./"
+    
+    default_config.DATA_DIR = "/mnt/ann/hy/data/"
 
     return default_config
