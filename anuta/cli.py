@@ -31,6 +31,7 @@ flags.DEFINE_enum("dataset", None, ['cidds', 'netflix', 'cicids', 'yatesbury', '
 flags.mark_flag_as_required('dataset')
 flags.DEFINE_string("data", None, "Path to the dataset to learn from or validate")
 flags.mark_flag_as_required('data')
+flags.DEFINE_string("neg_data", "", "Optional path to a dataset containing negative examples")
 flags.DEFINE_string("ref", "", "Path to the reference dataset")
 flags.DEFINE_string("rules", "", "Path to the learned rules")
 flags.DEFINE_boolean("baseline", False, "Use the baseline method Valiant algorithm")

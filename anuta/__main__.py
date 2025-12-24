@@ -25,7 +25,8 @@ from anuta.logic import LogicLearner
 from anuta.utils import log
 
     
-def main(constructor: Constructor, refconstructor: Constructor, limit: int):
+def main(constructor: Constructor, refconstructor: Constructor, limit: int,
+         neg_constructor: Constructor | None = None):
     if FLAGS.tree:
         match FLAGS.tree:
             case 'dt':
@@ -48,7 +49,7 @@ def main(constructor: Constructor, refconstructor: Constructor, limit: int):
     elif FLAGS.baseline:
         miner_valiant(constructor, limit)
     else:
-        learner = LogicLearner(constructor, limit=limit)
+        learner = LogicLearner(constructor, negative_constructor=neg_constructor, limit=limit)
         log.info("Learning constraints using logic programming...")
         if FLAGS.logic == 'denial':
             learner.learn_denial()
@@ -126,7 +127,12 @@ if __name__ == '__main__':
         # if refconstructor:
         #     log.info(f"Reference data: {refdata}")     
         
-        main(constructor, refconstructor, limit)
+        # Build optional negative constructor (same dataset type)
+        neg_constructor = None
+        if FLAGS.neg_data:
+            assert '.csv' in FLAGS.neg_data, "Negative data file is not CSV."
+            neg_constructor = constructor.__class__(FLAGS.neg_data)
+        main(constructor, refconstructor, limit, neg_constructor)
 
     elif FLAGS.validate:
         constructor.df = constructor.df.sample(n=limit, random_state=42).reset_index(drop=True) \

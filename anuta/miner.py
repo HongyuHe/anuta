@@ -151,38 +151,66 @@ def detect_partition(
 def validate(
     worker_idx: int, 
     dfpartition: pd.DataFrame,
-    rules: List[sp.Expr]
-) -> List[int]:
-    log.info(f"Worker {worker_idx+1} started.")
+    rules: List[sp.Expr],
+    domain_kinds: Dict[str, DomainType],
+) -> Tuple[List[int], List[int]]:
+    # log.info(f"Worker {worker_idx+1} started.")
     #* >0: Violated, 0: Not violated
     rule_violations = [0 for _ in range(len(rules))]
     sample_violations = [0 for _ in range(len(dfpartition))]
     invalid_samples = set()
+    evalmap = _build_evalmap(domain_kinds)
+    z3varmap = {name: evalmap.get(name) for name in domain_kinds if name in evalmap}
+    z3_rules: List[z3.ExprRef] = []
+    for rule in rules:
+        if isinstance(rule, bool):
+            z3_rules.append(z3.BoolVal(rule))
+            continue
+        try:
+            z3_rules.append(z3.simplify(eval(str(sp.sympify(rule)), evalmap)))
+        except Exception as exc:
+            log.error(f"Error converting rule to z3: {rule}\n{exc}")
+            raise
     
-    for i, sample in tqdm(dfpartition.iterrows(), total=len(dfpartition)):
-        assignments = sample.to_dict()
-        for k, rule in enumerate(rules):
-            # if violations[k]: 
-            #     #* This constraint has already been violated.
-            #     continue
-            #* Evaluate the constraint with the given assignments
-            if isinstance(rule, bool):
-                #* If the rule is a boolean, it is already evaluated.
-                sat = rule
+    for local_idx, (_, sample) in enumerate(tqdm(
+        dfpartition.iterrows(), total=len(dfpartition),
+        desc=f"Worker {worker_idx+1} processing samples"
+    )):
+        assignment: List[Tuple[z3.ExprRef, z3.ExprRef]] = []
+        invalid_assignment = False
+        for varname, value in sample.items():
+            if varname not in z3varmap:
+                continue
+            domaintype = domain_kinds.get(varname, DomainType.INTEGER)
+            z3value = _coerce_z3_value(varname, value, domaintype)
+            if z3value is None:
+                invalid_assignment = True
+                break
+            assignment.append((z3varmap[varname], z3value))
+        
+        if invalid_assignment:
+            sample_violations[local_idx] += 1
+            invalid_samples.add(local_idx)
+            continue
+        
+        for k, z3rule in enumerate(z3_rules):
+            substituted = z3.simplify(z3.substitute(z3rule, assignment))
+            if z3.is_false(substituted):
+                rule_violations[k] += 1
+                sample_violations[local_idx] += 1
+                invalid_samples.add(local_idx)
+            elif z3.is_true(substituted):
+                continue
             else:
-                sat = rule.subs(assignments)
-            try:
-                if not sat:
+                solver = z3.Solver()
+                solver.add(substituted)
+                if solver.check() != z3.sat:
                     rule_violations[k] += 1
-                    sample_violations[i] += 1
-                    invalid_samples.add(i)
-            except Exception as e:
-                log.error(f"Error evaluating {rule}:\n{e}")
-                pprint("Assignments:", assignments)
-                exit(1)
+                    sample_violations[local_idx] += 1
+                    invalid_samples.add(local_idx)
     #* The last value is the number of invalid samples.
     rule_violations.append(len(invalid_samples))
-    log.info(f"Worker {worker_idx+1} finished.")
+    # log.info(f"Worker {worker_idx+1} finished.")
     return rule_violations, sample_violations
 
 def validator(
@@ -192,6 +220,10 @@ def validator(
     save=True
 ) -> Tuple[float, float]:
     start = perf_counter()
+    
+    domain_kinds: Dict[str, DomainType] = {}
+    for varname, domain in constructor.anuta.domains.items():
+        domain_kinds[varname] = domain.kind
     
     #* Prepare arguments for parallel processing
     nworkers = core_count = psutil.cpu_count() if not FLAGS.cores else FLAGS.cores
@@ -204,14 +236,14 @@ def validator(
     log.info(f"Spawning {nworkers} workers for validation ...")
     if nworkers > 1:
         #* Prepare arguments for parallel processing
-        args = [(i, df, rules) for i, df in enumerate(dfpartitions)]
+        args = [(i, df, rules, domain_kinds) for i, df in enumerate(dfpartitions)]
         pool = Pool(core_count)
         log.info(f"Validating constraints in parallel ...")
         violations = pool.starmap(validate, args)
         log.info(f"All workers finished.")
         pool.close()
     else:
-        violations = validate(0, constructor.df, rules)
+        violations = validate(0, constructor.df, rules, domain_kinds)
     end = perf_counter()
     
     rule_violations, sample_violations = zip(*violations) if nworkers > 1 else violations
