@@ -446,16 +446,7 @@ class LogicLearner(object):
                 Theory.save_constraints({pr.expr for pr in self.prior}, "denial_priors_only.pl")
                 return
         # predicates: Set[Constraint] = self.generate_analytical_predicates()
-        
-        # evidence_sets: List[frozenset[Constraint]] = []
-        # #* First check if the evidence sets file exists, if so, load it.
-        # evidence_sets_file = f'data/evidence_sets_{self.dataset}_{self.num_examples}.pkl'
-        # if Path(evidence_sets_file).exists():
-        #     log.info(f"Loading evidence sets from {evidence_sets_file}...")
-        #     with open(evidence_sets_file, 'rb') as f:
-        #         evidence_sets = pickle.load(f)
-        #     log.info(f"Loaded {len(evidence_sets)} evidence sets.")
-        # else:
+
         start = perf_counter()
         evidence_sets: List[frozenset[Constraint]] = self.build_evidence_set(predicates, df=self.examples)
         end = perf_counter()
@@ -468,19 +459,7 @@ class LogicLearner(object):
             log.warning("No evidence sets were produced; returning only prior.")
 
         start = perf_counter()
-        # covers = self.enumerate_minimal_hitting_sets_stack(
-        #     evidence_sets=evidence_sets,
-        #     max_size=max_predicates,
-        #     max_solutions=max_learned_rules,
-        # )
-        # covers = self.enumerate_minimal_hitting_sets_suppression(
-        #     # predicates,
-        #     evidence_sets=evidence_sets,
-        #     max_size=max_predicates,
-        #     max_solutions=max_learned_rules,
-        # )
         covers = self.enumerate_minimal_hitting_sets(
-            # predicates,
             evidence_sets=evidence_sets,
             max_size=max_predicates,
             max_solutions=max_learned_rules,
@@ -559,6 +538,10 @@ class LogicLearner(object):
         pred_to_bit: Dict[Constraint, int] = {p: i for i, p in enumerate(pred_list)}
         global_solution_masks: Set[int] = set()
         masks_by_bit: Dict[int, Set[int]] = defaultdict(set)
+        # Index solutions by their minimum bit to support fast "subset-of" pruning in the DFS:
+        # if a partial chosen mask already contains any known minimal solution, no extension can be minimal.
+        solutions_by_minbit: Dict[int, Set[int]] = defaultdict(set)
+        solution_minbits_mask: int = 0
 
         def _bits_from_mask(mask: int) -> List[int]:
             bits: List[int] = []
@@ -577,18 +560,27 @@ class LogicLearner(object):
                 mask |= 1 << pred_to_bit[p]
             return mask
 
+        def _minbit_index(mask: int) -> int:
+            """Index of the least-significant set bit. Undefined for mask=0."""
+            return (mask & -mask).bit_length() - 1
+
         def _has_subset(mask: int) -> bool:
             """
-            Returns True if any existing solution is a subset of the candidate mask.
-            Enumerates submasks of mask; bounded by solution size (max_size).
+            Returns True if any known minimal solution mask is a subset of `mask`.
+            Used for:
+              - minimality filtering when adding a new solution, and
+              - pruning DFS states whose `chosen` already contains a known solution.
             """
-            submask = mask
-            while submask:
-                if submask in global_solution_masks:
-                    return True
-                #* A bit-manipulation idiom to iterate over all combinations of bits in mask.
-                #*  For example, if mask = 0b1101, submasks will be: {1101,1100,1001,1000,0101,0100,0001}
-                submask = (submask - 1) & mask
+            if not global_solution_masks:
+                return False
+            relevant_minbits = mask & solution_minbits_mask
+            while relevant_minbits:
+                lsb = relevant_minbits & -relevant_minbits
+                b = lsb.bit_length() - 1
+                for sol in solutions_by_minbit.get(b, ()):
+                    if (sol & mask) == sol:
+                        return True
+                relevant_minbits ^= lsb
             return False
 
         def _add_solution(mask: int) -> bool:
@@ -597,8 +589,10 @@ class LogicLearner(object):
             Removes supersets using per-bit indexes to avoid scanning all solutions.
             Returns True if added.
             """
+            nonlocal solution_minbits_mask
+
             if _has_subset(mask):
-                #* Check if any subsets of the selected predicates (stronger rule) 
+                #* Check if any subsets of the selected predicates (stronger rule)
                 #*  already exist as solutions.
                 return False
 
@@ -617,12 +611,21 @@ class LogicLearner(object):
             if superset_candidates:
                 for sup in superset_candidates:
                     global_solution_masks.discard(sup)
+                    # Remove from minbit index
+                    sup_minb = _minbit_index(sup)
+                    solutions_by_minbit[sup_minb].discard(sup)
+                    if not solutions_by_minbit[sup_minb]:
+                        del solutions_by_minbit[sup_minb]
+                        solution_minbits_mask &= ~(1 << sup_minb)
                     for b in _bits_from_mask(sup):
                         masks_by_bit[b].discard(sup)
 
             global_solution_masks.add(mask)
             for b in bits:
                 masks_by_bit[b].add(mask)
+            minb = _minbit_index(mask)
+            solutions_by_minbit[minb].add(mask)
+            solution_minbits_mask |= 1 << minb
             return True
 
         def _optimistic_lb(uncovered: Set[int]) -> int:
@@ -773,8 +776,8 @@ class LogicLearner(object):
             rng = random.Random(seed)
             solutions_this_run = 0
 
-            stack = [(set(), set(), FULL, {}, None, 0)]  
-            # frame: (chosen, covered, uncovered, chosen_info, candidates, next_idx)
+            stack = [(set(), 0, set(), FULL, {}, None, 0)]
+            # frame: (chosen, chosen_mask, covered, uncovered, chosen_info, candidates, next_idx)
 
             start_time = perf_counter()
             last_solution_time = perf_counter()
@@ -790,12 +793,15 @@ class LogicLearner(object):
                     log.warning(f"Search stalled for {cfg.STALL_TIMEOUT_SEC//60}min. Stopping.")
                     break
 
-                chosen, covered, uncovered, chosen_info, candidates, next_idx = stack.pop()
+                chosen, chosen_mask, covered, uncovered, chosen_info, candidates, next_idx = stack.pop()
+
+                # If we already contain a known minimal solution, any extension is a non-minimal superset.
+                if chosen_mask and _has_subset(chosen_mask):
+                    continue
 
                 #* --- SOLUTION FOUND (Optimized) ---
                 if not uncovered:
-                    mask = _mask_for(chosen)
-                    if _add_solution(mask):
+                    if chosen_mask and _add_solution(chosen_mask):
                         solutions_this_run += 1
                         last_solution_time = perf_counter()
                         progress.update(1)
@@ -840,19 +846,20 @@ class LogicLearner(object):
 
                 #* --- STACK PUSH (Branch 1: "Don't choose p") ---
                 # This state explores solutions *without* candidates[next_idx]
-                stack.append((chosen, covered, uncovered, chosen_info, candidates, next_idx + 1))
+                stack.append((chosen, chosen_mask, covered, uncovered, chosen_info, candidates, next_idx + 1))
 
                 #* --- STACK PUSH (Branch 2: "Choose p") ---
                 p = candidates[next_idx]
-                
+
                 new_chosen = set(chosen)
                 new_chosen.add(p)
-                
+                new_chosen_mask = chosen_mask | (1 << pred_to_bit[p])
+
                 new_covered = covered | idx_by_pred[p]
                 new_info = _extend_chosen_info(chosen_info, p)
                 new_uncovered = uncovered - idx_by_pred[p]
-                
-                stack.append((new_chosen, new_covered, new_uncovered, new_info, None, 0))
+
+                stack.append((new_chosen, new_chosen_mask, new_covered, new_uncovered, new_info, None, 0))
 
             return set(global_solution_masks)
 
@@ -1145,25 +1152,6 @@ class LogicLearner(object):
                 
         '''Augment the variables with constants.'''
         avars = set()
-        # for varname, consts in self.constants.items():
-        #     if varname in self.categoricals:
-        #         #* Only augment numerical variables with constants.
-        #         continue
-        #     vtype = variable_types[varname]
-        #     #& X*c 
-        #     if consts.kind == ConstantType.SCALAR:
-        #         for const in consts.values:
-        #             if const == 1: continue
-        #             avar = f"{const}$*${varname}"
-        #             avars.add(avar)
-        #             variable_types[avar] = vtype
-        #     #& X+c
-        #     if consts.kind == ConstantType.ADDITION:
-        #         for const in consts.values:
-        #             avar = f"{const}$+${varname}"
-        #             avars.add(avar)
-        #             variable_types[avar] = vtype
-            
         for varname, constants in self.multiconstants:
             if varname in self.categoricals:
                 #* Only augment numerical variables with constants.

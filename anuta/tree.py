@@ -341,9 +341,9 @@ class EntropyTreeLearner(TreeLearner):
         print(f"\t{new_rule_counts=}")
         print(f"\t{unclassified_counts=}")
         
-        before_merge = len(self.learned_rules)
-        self.learned_rules = self._merge_rules_by_premise(self.learned_rules)
-        log.info(f"Merged learned rules: {before_merge} -> {len(self.learned_rules)}")
+        # before_merge = len(self.learned_rules)
+        # self.learned_rules = self._merge_rules_by_premise(self.learned_rules)
+        # log.info(f"Merged learned rules: {before_merge} -> {len(self.learned_rules)}")
         
         assumptions = set(self.prior)
         rules = self.learned_rules | assumptions

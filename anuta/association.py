@@ -82,7 +82,7 @@ class AssociationRuleLearner:
     sep = '::'
     
     def __init__(self, constructor: Constructor, algorithm='hmine', 
-                 limit=None, min_support=1e-10, **kwargs):
+                 limit=None, min_support=0.08, **kwargs):
         self.algorithm = algorithm
         self.min_support = min_support
         self.kwargs = kwargs
@@ -123,74 +123,15 @@ class AssociationRuleLearner:
                 raise ValueError("Unsupported algorithm: {}".format(self.algorithm))
         
         start = perf_counter()
-        # # Pre-stringify entire DataFrame once (avoids repeated astype calls)
-        # df_str = self.df.astype(str)
-        
-        # bucket_size = 2
-        # extracted_rules = []
-        # rulecolsets = []
-        # while bucket_size < len(self.df.columns):
-        #     adfs = []
-        #     total_combo = math.comb(len(df_str.columns), bucket_size)
-        #     log.info(f"Generating size-{bucket_size} itemsets ({total_combo} combinations)...")
-        #     itemsets = itertools.combinations(df_str.columns, bucket_size)
-        #     pruned_itemsets = list(itemsets)
-        #     for itemset in tqdm(itemsets, desc=f"Pruning size-{bucket_size} itemsets", total=total_combo):
-        #         itemset = set(itemset)
-        #         for rulecolset in rulecolsets:
-        #             if itemset.issubset(rulecolset) or itemset.issuperset(rulecolset):
-        #                 pruned_itemsets.remove(itemset)
-        #                 break
-        #     log.info(f"Pruned {total_combo - len(pruned_itemsets)} itemsets; {len(pruned_itemsets)} remain.")
-        #     # itemsets = pruned_itemsets    
-        #     rulecolsets = []
-        #     for cols in tqdm(
-        #         pruned_itemsets,
-        #         desc=f"Mining size-{bucket_size} itemsets",
-        #         total=len(pruned_itemsets)
-        #     ):
-        #         subset = df_str[list(cols)]
-
-        #         # Vectorized transaction building: each row becomes tuple of "col<sep>value"
-        #         col_array = subset.columns.to_numpy()[np.newaxis, :]
-        #         transactions = (col_array + self.sep + subset.to_numpy()).tolist()
-
-        #         te = TransactionEncoder()
-        #         te_ary = te.fit(transactions).transform(transactions)
-        #         itemsetdf = pd.DataFrame(te_ary, columns=te.columns_)
-                
-        #         frequent_itemsets= method(
-        #             itemsetdf, min_support=self.min_support, use_colnames=True, **self.kwargs)
-        #         # log.info(f"Frequent itemsets found: {len(frequent_itemsets)}")
-                
-        #         adf = association_rules(frequent_itemsets, 
-        #                                     metric="confidence",
-        #                                     #* Learn hard rules by default (min_threshold=1)
-        #                                     min_threshold=min_threshold,) #, support_only=True
-        #         adfs.append(adf)
-        #         if len(adfs) > 30:
-        #             break
-                
-        #     aruledf = pd.concat(adfs, ignore_index=True)
-        #     arules, colsets = self.extract_rules(aruledf)
-        #     extracted_rules.extend(arules)
-        #     rulecolsets.extend(colsets)
-        #     # pprint(arules)
-        #     # pprint(colsets)
-        #     log.info(f"Association rules learned: {len(extracted_rules)}")
-        #     log.info(f"Rule column sets: {len(rulecolsets)}")
-        #     bucket_size += 1
-        #     if bucket_size > 4:
-        #         exit(0)
-        
         frequent_itemsets= method(
-            self.df, min_support=self.min_support, use_colnames=True, **self.kwargs)
+            self.df, min_support=self.min_support, use_colnames=True, max_len=4, **self.kwargs)
         log.info(f"Frequent itemsets found: {len(frequent_itemsets)}")
         
         aruledf = association_rules(frequent_itemsets, 
                                     metric="confidence",
                                     #* Learn hard rules by default (min_threshold=1)
-                                    min_threshold=min_threshold,) #, support_only=True
+                                    min_threshold=min_threshold
+                                    ) #, support_only=True
         log.info(f"Association rules found: {len(aruledf)}")
         end = perf_counter()
         log.info(f"Association rule learning took {end - start:.2f} seconds.")
