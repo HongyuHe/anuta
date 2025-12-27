@@ -772,25 +772,28 @@ class LogicLearner(object):
             new_info[var] = var_info
             return new_info
 
-        def _run_search(seed: Optional[int]) -> Set[int]:
+        def _run_search(seed: Optional[int]) -> Tuple[Set[int], str]:
             rng = random.Random(seed)
-            solutions_this_run = 0
+            solutions_added = 0
 
             stack = [(set(), 0, set(), FULL, {}, None, 0)]
             # frame: (chosen, chosen_mask, covered, uncovered, chosen_info, candidates, next_idx)
 
             start_time = perf_counter()
             last_solution_time = perf_counter()
+            stop_reason = "exhausted"
 
             while stack:
                 #* --- Global Timeouts ---
                 if perf_counter() - start_time > cfg.TIMEOUT_SEC:
                     log.warning(f"Learning timed out after {cfg.TIMEOUT_SEC//60}min.")
+                    stop_reason = "timeout"
                     break
                 
                 # stall timeout
                 if perf_counter() - last_solution_time > cfg.STALL_TIMEOUT_SEC:
                     log.warning(f"Search stalled for {cfg.STALL_TIMEOUT_SEC//60}min. Stopping.")
+                    stop_reason = "stall_timeout"
                     break
 
                 chosen, chosen_mask, covered, uncovered, chosen_info, candidates, next_idx = stack.pop()
@@ -802,14 +805,16 @@ class LogicLearner(object):
                 #* --- SOLUTION FOUND (Optimized) ---
                 if not uncovered:
                     if chosen_mask and _add_solution(chosen_mask):
-                        solutions_this_run += 1
+                        solutions_added += 1
                         last_solution_time = perf_counter()
-                        progress.update(1)
-                        
-                        if max_solutions:
-                            global_progress = progress.n or 0
-                            if solutions_this_run >= max_solutions or global_progress >= max_solutions:
-                                return set(global_solution_masks)
+                        # Track the number of *current* minimal solutions (not total additions),
+                        # since `_add_solution` may remove dominated supersets.
+                        progress.n = len(global_solution_masks)
+                        progress.refresh()
+
+                        if max_solutions and len(global_solution_masks) >= max_solutions:
+                            stop_reason = "max_solutions"
+                            return set(global_solution_masks), stop_reason
                     continue
 
                 #* --- PRUNING ---
@@ -861,13 +866,18 @@ class LogicLearner(object):
 
                 stack.append((new_chosen, new_chosen_mask, new_covered, new_uncovered, new_info, None, 0))
 
-            return set(global_solution_masks)
+            if stop_reason == "exhausted" and max_solutions is not None:
+                log.info(
+                    f"Search exhausted: found {len(global_solution_masks)}/{max_solutions} minimal hitting sets "
+                    f"(added {solutions_added} total candidate solutions)."
+                )
+            return set(global_solution_masks), stop_reason
 
         progress = tqdm(desc=f"... Enumerating hitting sets (max_size={max_size})",
                         unit=" sets", total=max_solutions)
 
         try:
-            merged_masks = _run_search(None)
+            merged_masks, _stop_reason = _run_search(None)
         except KeyboardInterrupt:
             log.warning("\nSearch interrupted by user (Ctrl+C). Returning partial results.")
             merged_masks = set(global_solution_masks)
@@ -1215,69 +1225,87 @@ class LogicLearner(object):
             #     continue
             
             #& Predicates with constants.
+            lhs_unique_values = None
+            lhs_num_unique = None
             for varname, constants in self.multiconstants:
                 if varname != lhs:
                     #* Find the constants for this variable.
                     continue
                 #& X=c
                 if constants.kind == ConstantType.ASSIGNMENT:
+                    if lhs_unique_values is None:
+                        lhs_unique_values = set(self.examples[lhs].unique())
+                        lhs_num_unique = len(lhs_unique_values)
                     for constant in constants.values:
-                        predicates.add(f"Eq({lhs}, {constant})")
-                        predicates.add(f"Ne({lhs}, {constant})")
-                #& X > c and X < c
+                        eq_predicate = f"Eq({lhs}, {constant})"
+                        ne_predicate = f"Ne({lhs}, {constant})"
+                        #* Add only predicates that vary across the dataset; otherwise record as priors.
+                        if lhs_num_unique and lhs_num_unique > 1 and constant in lhs_unique_values:
+                            predicates.add(eq_predicate)
+                            predicates.add(ne_predicate)
+                        else:
+                            #* Invert if equality is always false.
+                            prior_rules.add(ne_predicate if constant not in lhs_unique_values else eq_predicate)
+
                 #* Use strict inequality, the negations will cover the other side.
                 if constants.kind == ConstantType.LIMIT:
+                    if lhs_unique_values is None:
+                        lhs_unique_values = set(self.examples[lhs].unique())
+                        lhs_num_unique = len(lhs_unique_values)
                     for constant in constants.values:
-                        predicates.add(f"({lhs} > {constant})")
+                        #& X > c 
+                        predicate = f"({lhs} > {constant})"
+                        predicate_values = (self.examples[lhs] > constant).astype(int)
+                        if predicate_values.nunique() > 1:
+                            predicates.add(predicate)
+                        else:
+                            if predicate_values.iloc[0] == 0:
+                                predicate = f"({lhs} <= {constant})"
+                            prior_rules.add(predicate)
+                        
+                        #& X < c
                         if constant != 0:
                             #! Assume no negative values.
-                            predicates.add(f"({lhs} < {constant})")
+                            predicate = f"({lhs} < {constant})"
+                            predicate_values = (self.examples[lhs] < constant).astype(int)
+                            if predicate_values.nunique() > 1:
+                                predicates.add(predicate)
+                            else:
+                                if predicate_values.iloc[0] == 0:
+                                    predicate = f"({lhs} >= {constant})"
+                                prior_rules.add(predicate)
+
+                        #& Equality predicate at the boundary (to cover >= / <= via disjunction).
+                        #* Only add if equality can occur in the data; otherwise it can't help cover anything.
+                        if constant in lhs_unique_values:
+                            eq_predicate = f"Eq({lhs}, {constant})"
+                            if eq_predicate not in predicates and eq_predicate not in prior_rules:
+                                if lhs_num_unique and lhs_num_unique > 1:
+                                    predicates.add(eq_predicate)
+                                else:
+                                    prior_rules.add(eq_predicate)
+                        
             if (domaintype_lhs == DomainType.CATEGORICAL
                 and vtype_lhs not in [VariableType.IP, VariableType.PORT]):
                 #* Don't create Eq/Ne predicates for identifiers (IP/PORT).
                 #* Only consider domain values if no constants are defined.
                 #& X=x
+                if lhs_unique_values is None:
+                    lhs_unique_values = set(self.examples[lhs].unique())
+                    lhs_num_unique = len(lhs_unique_values)
                 for value in self.domains[lhs].values:
-                    predicates.add(f"Eq({lhs}, {value})")
-                    predicates.add(f"Ne({lhs}, {value})")
+                    eq_predicate = f"Eq({lhs}, {value})"
+                    ne_predicate = f"Ne({lhs}, {value})"
+                    if lhs_num_unique and lhs_num_unique > 1 and value in lhs_unique_values:
+                        predicates.add(eq_predicate)
+                        predicates.add(ne_predicate)
+                    else:
+                        #* Invert if equality is always false.
+                        prior_rules.add(ne_predicate if value not in lhs_unique_values else eq_predicate)
             #TODO: Move this to constructor.
             if vtype_lhs == VariableType.SEQUENCING:
                 predicates.add(f"({lhs} > 1)")
                 predicates.add(f"({lhs} <= 1)")
-                
-            # if domaintype_lhs == DomainType.CATEGORICAL:
-                # #! Assuming one variable has only one type of constants.
-                # if (lhs in self.constants 
-                #     and self.constants[lhs].kind == ConstantType.ASSIGNMENT):
-                #     #& X=c
-                #     for constant in self.constants[lhs].values:
-                #         predicates.add(f"Eq({lhs}, {constant})")
-                #         predicates.add(f"Ne({lhs}, {constant})")
-                # elif vtype_lhs not in [VariableType.IP, VariableType.PORT]:
-                #     #* Don't create Eq/Ne predicates for identifiers (IP/PORT).
-                #     #* Only consider domain values if no constants are defined.
-                #     #& X=x
-                #     for value in self.domains[lhs].values:
-                #         predicates.add(f"Eq({lhs}, {value})")
-                #         predicates.add(f"Ne({lhs}, {value})")
-            # else:
-                #& DomainType.NUMERICAL_INTEGER / NUMERICAL_REAL
-                # if (lhs in self.constants
-                #     and self.constants[lhs].kind == ConstantType.LIMIT):
-                #     #& X > c and X ≤ c
-                #     for constants in self.constants[lhs].values:
-                #         predicates.add(f"({lhs} > {constants})")
-                #         if constants != 0:
-                #             #! Assume no negative values.
-                #             predicates.add(f"({lhs} <= {constants})")
-                #         #? Since we don't care equality (X=c), we omit the following:
-                #         # predicates.add(f"({lhs} <= {constant})")
-                #         # predicates.add(f"({lhs} > {constant})")
-                # #TODO: Enable one var with multiple types of constants.
-                # #*  Here, ACK and SEQ numbers require ADDITION (+1) and LIMIT (<1).
-                # if vtype_lhs == VariableType.SEQUENCING:
-                #     predicates.add(f"({lhs} > 1)")
-                #     predicates.add(f"({lhs} <= 1)")
             
             #* Allow all types of variables in the RHS.
             #! Order matters with `j`
@@ -1329,28 +1357,27 @@ class LogicLearner(object):
                     if predicate_values.nunique() > 1:
                         self.examples[predicate] = predicate_values
                         predicates.add(predicate)
+                        
+                        #& Inequality predicates: Ne(A,B)
+                        predicate = f"Ne({lhs},{rhs})"
+                        predicate_values = (self.examples[lhs]!=self.examples[rhs]).astype(int)
+                        #* Should have >1 unique value to this point.
+                        assert predicate_values.nunique() > 1, \
+                            "Ne predicate should have more than one unique value at this point."
+                        self.examples[predicate] = predicate_values
+                        predicates.add(predicate)
                     else:
-                        #* Invert the predicate if it's always false.
+                        #* Record the always-true relation as a prior (Eq if always true, else Ne).
                         if predicate_values.iloc[0] == 0:
                             predicate = f"Ne({lhs},{rhs})"
                         prior_rules.add(predicate)
-                        #* Skip the rest of the predicates with this LHS.
-                        continue
-                        
-                    #& Inequality predicates: Ne(A,B)
-                    predicate = f"Ne({lhs},{rhs})"
-                    predicate_values = (self.examples[lhs]!=self.examples[rhs]).astype(int)
-                    #* Should have >1 unique value to this point.
-                    assert predicate_values.nunique() > 1, \
-                        "Ne predicate should have more than one unique value at this point."
-                    self.examples[predicate] = predicate_values
-                    predicates.add(predicate)
+                        #* Do not `continue`: (lhs > rhs) / (lhs < rhs) may still vary even if Eq is constant.
                 
                 #* Doesn't make sense to compare sequencing variables other than equality.
                 if (vtype_lhs != VariableType.SEQUENCING
-                    and domaintype_lhs in (DomainType.INTEGER, DomainType.REAL) ):
-                        assert domaintype_rhs in (DomainType.INTEGER, DomainType.REAL), \
-                            "LHS and RHS must have the same domain type."
+                    and domaintype_lhs != DomainType.CATEGORICAL ):
+                        assert domaintype_rhs != DomainType.CATEGORICAL, \
+                            "LHS and RHS must both be non-categorical for comparison predicates."
                         #& Comparison predicates: A>B
                         predicate = f"({lhs}>{rhs})"
                         predicate_values = (self.examples[lhs]>self.examples[rhs]).astype(int)

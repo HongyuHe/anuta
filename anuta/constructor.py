@@ -280,7 +280,8 @@ class Constructor(object):
                             raise ValueError(f"Unknown operator {op2} in {var2}.")
                         if rhs_values.nunique() <= 1:
                             #* Skip abstract variables with only one unique value.
-                            # log.info(f"Skipping abstract {rhs=} with only one unique value.")
+                            #* Record as a prior (mirrors LogicLearner.generate_predicates_and_prior).
+                            prior_rules.add(f"Eq({rhs},{rhs_values.iloc[0]})")
                             continue
                         else:
                             adf[rhs] = rhs_values
