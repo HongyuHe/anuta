@@ -79,6 +79,8 @@ if __name__ == '__main__':
             constructor = Mawi(FLAGS.data)
         case 'ana':
             constructor = Analysis(FLAGS.data)
+        case 'abr':
+            constructor = AbrState(FLAGS.data)
         case _:
             raise ValueError(f"Unknown dataset: {dataset}")
     
@@ -135,36 +137,53 @@ if __name__ == '__main__':
         main(constructor, refconstructor, limit, neg_constructor)
 
     elif FLAGS.validate:
-        constructor.df = constructor.df.sample(n=limit, random_state=42).reset_index(drop=True) \
-            if FLAGS.limit else constructor.df
+        if FLAGS.limit and len(constructor.df) > limit:
+            constructor.df = constructor.df.sample(n=limit, random_state=42).reset_index(drop=True)
         
         assert FLAGS.rules, "No rules file provided."
         rulepath: str = FLAGS.rules
         assert rulepath.endswith('.pl'), "Invalid rule file."
         rules = Theory.load_constraints(rulepath, False)
-        rule_label = "_".join(rulepath.split('_')[1:])[:-3]
-        checked = 'checked' in rulepath
-        label = f"{data_label}-{rule_label}"
+        # rule_label = "_".join(rulepath.split('_'))[:-3]
+        # checked = 'checked' in rulepath
+        rule_label = rulepath.split('/')[-1][:-3]
+        label = f"{rule_label}-{data_label}"
+        # print(f"{label=} {data_label=} {rule_label=}")
         
         log.info(f"Validating {len(constructor.df)} samples from {FLAGS.data} using {rulepath}")
         
+        start = perf_counter()
         rule_vio_rate, sample_vio_rate = validator(constructor, rules, label)
-        violation_record = ','.join([data_label, str(rule_label), str(rule_vio_rate), str(sample_vio_rate)])
-        #TODO: Specify all file names in the config file.
-        violation_file = f"validation_records.csv"
-        if Path(violation_file).exists():
-            with open(violation_file, 'a') as f:
-                f.write(violation_record + '\n')
+        runtime_seconds = perf_counter() - start
+        run_label = FLAGS.label or label
+        validation_record = ",".join(
+            [
+                run_label,
+                data_label,
+                str(rule_label),
+                str(rule_vio_rate),
+                str(sample_vio_rate),
+                str(len(constructor.df)),
+                f"{runtime_seconds:.2f}",
+            ]
+        )
+        validation_file = "validation_records.csv"
+        if Path(validation_file).exists():
+            with open(validation_file, "a", encoding="utf-8") as f:
+                f.write(validation_record + "\n")
         else:
-            with open(violation_file, 'w') as f:
-                f.write("data,rule,rule_violation_rate,sample_violation_rate\n")
-                f.write(violation_record + '\n')
+            with open(validation_file, "w", encoding="utf-8") as f:
+                f.write(
+                    "label,data,rule,rule_violation_rate,sample_violation_rate,examples,runtime_seconds\n"
+                )
+                f.write(validation_record + "\n")
     elif FLAGS.detect:
         assert FLAGS.rules, "No rules file provided."
         rulepath = FLAGS.rules
         assert rulepath.endswith('.pl'), "Invalid rule file."
-        rule_label = "_".join(rulepath.split('_')[1:])[:-3]
-        label = f"{data_label}-{rule_label}"
+        # rule_label = "_".join(rulepath.split('_')[1:])[:-3]
+        rule_label = rulepath.split('/')[-1][:-3]
+        label = f"{rule_label}-{data_label}"
         detector_limit = limit if FLAGS.limit else 0
         
         log.info(f"Detecting violations on {FLAGS.data} using {rulepath}")

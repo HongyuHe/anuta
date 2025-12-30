@@ -69,6 +69,8 @@ class VariableType(Enum):
     POINTER = auto()
     WINDOW = auto()
     TIME = auto()
+    TIME_MS = auto()
+    TIME_SEC = auto()
     PROTO = auto()
     TTL = auto()
     AGGREGATE = auto()
@@ -76,6 +78,8 @@ class VariableType(Enum):
     CONNECTION = auto()
     INTERARRIVAL = auto()
     TOS = auto()
+    THROUGHPUT = auto()
+    BITRATE = auto()
     UNKNOWN = auto()
 
 
@@ -92,12 +96,16 @@ TYPE_DOMIAN = {
     VariableType.POINTER: DomainType.INTEGER,
     VariableType.WINDOW: DomainType.INTEGER,
     VariableType.TIME: DomainType.REAL,
+    VariableType.TIME_MS: DomainType.REAL,
+    VariableType.TIME_SEC: DomainType.REAL,
     VariableType.TTL: DomainType.INTEGER,
     VariableType.AGGREGATE: DomainType.INTEGER,
     VariableType.MEASUREMENT: DomainType.INTEGER,
     VariableType.CONNECTION: DomainType.INTEGER,
     VariableType.INTERARRIVAL: DomainType.INTEGER,
     VariableType.TOS: DomainType.CATEGORICAL,
+    VariableType.THROUGHPUT: DomainType.REAL,
+    VariableType.BITRATE: DomainType.CATEGORICAL,
     #! Default to categorical for unknown types.
     VariableType.UNKNOWN: DomainType.CATEGORICAL,
 }
@@ -106,6 +114,14 @@ TYPE_DOMIAN = {
 def get_variable_type(name: str) -> VariableType:
     lname = name.lower()
 
+    if lname.endswith("ms") or "delayms" in lname:
+        return VariableType.TIME_MS
+    elif "seconds" in lname or lname.endswith("sec") or "bufferseconds" in lname:
+        return VariableType.TIME_SEC
+    elif "throughput" in lname or "bandwidth" in lname or lname.endswith("mbps"):
+        return VariableType.THROUGHPUT
+    elif "bitrate" in lname or lname.endswith("kbps") or lname.endswith("bps"):
+        return VariableType.BITRATE
     if any(k in lname for k in ('ipsrc', 'ipdst', 'ipaddr', 'srcip', 'dstip')):
         return VariableType.IP
     elif 'ttl' in lname:

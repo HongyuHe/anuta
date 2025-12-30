@@ -1,10 +1,11 @@
 from collections import defaultdict
 import heapq
 from itertools import combinations
+import math
 from pathlib import Path
 import random
 from multiprocess import Pool
-from time import perf_counter, time
+from time import perf_counter
 from typing import *
 from joblib import Parallel, delayed
 import numpy as np
@@ -459,7 +460,7 @@ class LogicLearner(object):
             log.warning("No evidence sets were produced; returning only prior.")
 
         start = perf_counter()
-        covers = self.enumerate_minimal_hitting_sets(
+        covers, stop_reason = self.enumerate_minimal_hitting_sets(
             evidence_sets=evidence_sets,
             max_size=max_predicates,
             max_solutions=max_learned_rules,
@@ -467,6 +468,8 @@ class LogicLearner(object):
         end = perf_counter()
         print()
         log.info(f"Enumerated {len(covers)} minimal hitting sets in {(end - start)/60:.2f} minutes.")
+        if stop_reason not in ("exhausted", "unknown"):
+            log.info(f"Hitting-set search stopped due to: {stop_reason}")
         
         learned_rules: Set[sp.Expr] = set()
         num_trivial = 0
@@ -500,7 +503,7 @@ class LogicLearner(object):
         evidence_sets: List[FrozenSet[Constraint]],
         max_size: Optional[int] = None,
         max_solutions: Optional[int] = None,
-    ) -> List[Set[Constraint]]:
+    ) -> Tuple[List[Set[Constraint]], str]:
         """
         Enumerate all minimal hitting sets H such that ∀E in evidence_sets: H ∩ E ≠ ∅.
         
@@ -776,8 +779,8 @@ class LogicLearner(object):
             rng = random.Random(seed)
             solutions_added = 0
 
-            stack = [(set(), 0, set(), FULL, {}, None, 0)]
             # frame: (chosen, chosen_mask, covered, uncovered, chosen_info, candidates, next_idx)
+            stack = [(set(), 0, set(), FULL, {}, None, 0)]
 
             start_time = perf_counter()
             last_solution_time = perf_counter()
@@ -876,9 +879,11 @@ class LogicLearner(object):
         progress = tqdm(desc=f"... Enumerating hitting sets (max_size={max_size})",
                         unit=" sets", total=max_solutions)
 
+        stop_reason = "unknown"
         try:
-            merged_masks, _stop_reason = _run_search(None)
+            merged_masks, stop_reason = _run_search(None)
         except KeyboardInterrupt:
+            stop_reason = "keyboard_interrupt"
             log.warning("\nSearch interrupted by user (Ctrl+C). Returning partial results.")
             merged_masks = set(global_solution_masks)
         finally:
@@ -889,7 +894,7 @@ class LogicLearner(object):
         for mask in merged_masks:
             pred_set = {pred_list[i] for i in _bits_from_mask(mask)}
             solutions.append(pred_set)
-        return solutions
+        return solutions, stop_reason
 
     def learn_levelwise(
         self,
@@ -1064,6 +1069,73 @@ class LogicLearner(object):
         # Pre-pack predicates into a list so all workers use same reference
         examples_df = df if df is not None else self.examples
         evidence_sets: List[Set[Constraint]] = []
+        eq_rtol = getattr(cfg, "NUMERIC_EQ_RTOL", None)
+        eq_atol = getattr(cfg, "NUMERIC_EQ_ATOL", None)
+        if eq_rtol is None and eq_atol is None:
+            # Backward compatibility (deprecated): treat RESOLUTION as both relative/absolute tolerance.
+            eq_resolution = getattr(cfg, "NUMERIC_EQ_RESOLUTION", 0.0)
+            eq_rtol = eq_resolution
+            eq_atol = eq_resolution
+        try:
+            eq_rtol = float(eq_rtol or 0.0)
+        except Exception:
+            eq_rtol = 0.0
+        try:
+            eq_atol = float(eq_atol or 0.0)
+        except Exception:
+            eq_atol = 0.0
+        if eq_rtol < 0:
+            eq_rtol = 0.0
+        if eq_atol < 0:
+            eq_atol = 0.0
+        use_isclose = (eq_rtol > 0.0) or (eq_atol > 0.0)
+
+        def _is_intlike(value: Any, value_f: float) -> bool:
+            if isinstance(value, (bool, np.bool_)):
+                return True
+            if isinstance(value, (int, np.integer)):
+                return True
+            is_integer = getattr(value, "is_integer", None)
+            if is_integer is True:
+                return True
+            if isinstance(value, (float, np.floating)):
+                return float(value).is_integer()
+            try:
+                return float(value_f).is_integer()
+            except Exception:
+                return False
+
+        def _satisfies(expr: sp.Expr, row_dict: Dict[str, Any]) -> bool:
+            """
+            Evaluate predicate with numeric-tolerant Eq/Ne.
+
+            If `cfg.NUMERIC_EQ_RTOL/ATOL` are set, Eq/Ne over numeric expressions use
+            math.isclose-style comparison to avoid false negatives due to float precision.
+            """
+            if use_isclose and isinstance(expr, (sp.Eq, sp.Ne)):
+                lhs, rhs = expr.args
+                lhs_val = lhs.subs(row_dict)
+                rhs_val = rhs.subs(row_dict)
+                try:
+                    lhs_f = float(lhs_val)
+                    rhs_f = float(rhs_val)
+                except Exception:
+                    return bool(expr.subs(row_dict))
+
+                if not (math.isfinite(lhs_f) and math.isfinite(rhs_f)):
+                    return False
+
+                if _is_intlike(lhs_val, lhs_f) and _is_intlike(rhs_val, rhs_f):
+                    eq = int(lhs_f) == int(rhs_f)
+                else:
+                    eq = math.isclose(lhs_f, rhs_f, rel_tol=eq_rtol, abs_tol=eq_atol)
+
+                if isinstance(expr, sp.Eq):
+                    return eq
+                return not eq
+
+            return bool(expr.subs(row_dict))
+
         #* First check if the evidence sets file exists, if so, load it.
         data_dir = FLAGS.config.DATA_DIR
         evidence_sets_file = f'{data_dir}/evidence_sets_{self.dataset}_{self.num_examples}_{FLAGS.label}.pkl' \
@@ -1100,7 +1172,7 @@ class LogicLearner(object):
                 satisfied = set()
                 for p in predicates_list:
                     # try:
-                    if p.expr.subs(row_dict):
+                    if _satisfies(p.expr, row_dict):
                         satisfied.add(p)
                     # except Exception:
                     #     # Any substitution/eval failure = not satisfied
@@ -1140,6 +1212,135 @@ class LogicLearner(object):
                 log.info(f"Saved evidence sets to {evidence_sets_file}.")
 
         return results
+
+    def _generate_abr_template_predicates(self) -> Tuple[Set[str], Set[str]]:
+        predicates: Set[str] = set()
+        priors: Set[str] = set()
+
+        required = {"ThroughputMbps", "DelayMs", "ChosenChunkBytes"}
+        missing = required - set(self.examples.columns)
+        if missing:
+            log.warning(f"[ABR] Skipping ABR templates; missing columns: {sorted(missing)}")
+            return predicates, priors
+
+        df = self.examples
+        thr = pd.to_numeric(df["ThroughputMbps"], errors="coerce")
+        delay = pd.to_numeric(df["DelayMs"], errors="coerce")
+        chunk = pd.to_numeric(df["ChosenChunkBytes"], errors="coerce")
+
+        eq_rtol = getattr(cfg, "NUMERIC_EQ_RTOL", None)
+        eq_atol = getattr(cfg, "NUMERIC_EQ_ATOL", None)
+        if eq_rtol is None and eq_atol is None:
+            # Backward compatibility (deprecated): treat RESOLUTION as both relative/absolute tolerance.
+            eq_resolution = getattr(cfg, "NUMERIC_EQ_RESOLUTION", 0.0)
+            eq_rtol = eq_resolution
+            eq_atol = eq_resolution
+        try:
+            eq_rtol = float(eq_rtol or 0.0)
+        except Exception:
+            eq_rtol = 0.0
+        try:
+            eq_atol = float(eq_atol or 0.0)
+        except Exception:
+            eq_atol = 0.0
+        if eq_rtol < 0:
+            eq_rtol = 0.0
+        if eq_atol < 0:
+            eq_atol = 0.0
+        use_isclose = (eq_rtol > 0.0) or (eq_atol > 0.0)
+
+        lhs_bits = thr.astype(float) * 1000.0 * delay.astype(float)
+        rhs_bits = chunk.astype(float) * 8.0
+        abs_err = (lhs_bits - rhs_bits).abs()
+
+        def _keep(expr: str, mask: pd.Series) -> None:
+            mask = mask.fillna(False).astype(bool)
+            if mask.nunique() > 1:
+                predicates.add(expr)
+                return
+            if len(mask) and bool(mask.iloc[0]):
+                priors.add(expr)
+
+        # Exact cross-multiplied equality:
+        #   ThroughputMbps*1000 (bits/ms) * DelayMs (ms) == ChosenChunkBytes*8 (bits)
+        if use_isclose:
+            eq_mask = pd.Series(
+                np.isclose(lhs_bits, rhs_bits, rtol=eq_rtol, atol=eq_atol),
+                index=df.index,
+            )
+        else:
+            eq_mask = lhs_bits == rhs_bits
+        _keep(
+            "Eq(ThroughputMbps*1000*DelayMs, ChosenChunkBytes*8)",
+            eq_mask,
+        )
+
+        # Relative-error templates (scale with chunk size).
+        for eps in (0.01, 0.05, 0.1):
+            _keep(
+                f"(Abs(ThroughputMbps*1000*DelayMs - ChosenChunkBytes*8) <= {eps}*ChosenChunkBytes*8)",
+                abs_err <= (eps * rhs_bits),
+            )
+
+        # Absolute-error templates (data-driven cutoffs).
+        try:
+            abs_err_thresholds = get_quantiles(abs_err)
+        except Exception:
+            abs_err_thresholds = []
+        for t in abs_err_thresholds:
+            try:
+                t_val = float(t)
+            except Exception:
+                continue
+            if t_val <= 0:
+                continue
+            _keep(
+                f"(Abs(ThroughputMbps*1000*DelayMs - ChosenChunkBytes*8) <= {t_val})",
+                abs_err <= t_val,
+            )
+
+        # Bitrate should generally be <= throughput (in compatible units).
+        if "BitrateKbps" in df.columns:
+            bitrate = pd.to_numeric(df["BitrateKbps"], errors="coerce").astype(float)
+            throughput_kbps = thr.astype(float) * 1000.0
+            _keep(
+                "(BitrateKbps<1000*ThroughputMbps)",
+                bitrate < throughput_kbps,
+            )
+            _keep(
+                "(BitrateKbps>1000*ThroughputMbps)",
+                bitrate > throughput_kbps,
+            )
+            _keep(
+                "Eq(BitrateKbps,1000*ThroughputMbps)",
+                pd.Series(
+                    np.isclose(bitrate, throughput_kbps, rtol=eq_rtol, atol=eq_atol),
+                    index=df.index,
+                )
+                if use_isclose
+                else (bitrate == throughput_kbps),
+            )
+
+            bitrate_x_time = bitrate * delay.astype(float)
+            _keep(
+                "(BitrateKbps*DelayMs<8*ChosenChunkBytes)",
+                bitrate_x_time < rhs_bits,
+            )
+            _keep(
+                "(BitrateKbps*DelayMs>8*ChosenChunkBytes)",
+                bitrate_x_time > rhs_bits,
+            )
+            _keep(
+                "Eq(BitrateKbps*DelayMs,8*ChosenChunkBytes)",
+                pd.Series(
+                    np.isclose(bitrate_x_time, rhs_bits, rtol=eq_rtol, atol=eq_atol),
+                    index=df.index,
+                )
+                if use_isclose
+                else (bitrate_x_time == rhs_bits),
+            )
+
+        return predicates, priors
 
 
     def generate_predicates_and_prior(self) -> Set[Constraint]:
@@ -1402,6 +1603,12 @@ class LogicLearner(object):
                             prior_rules.add(predicate)
                             # continue
         #^ End for j, lhs in enumerate(self.variables)
+
+        if self.dataset == "abr":
+            abr_preds, abr_priors = self._generate_abr_template_predicates()
+            predicates |= abr_preds
+            prior_rules |= abr_priors
+
         # prior_rules = set()
         '''Add domain constraints to prior rules.'''
         self.examples = self.examples[self.variables]
@@ -1419,6 +1626,7 @@ class LogicLearner(object):
             domaintype = TYPE_DOMIAN[vtype]
             if domaintype in (DomainType.INTEGER, DomainType.REAL):
                 bounds = self.domains[varname].bounds
+                assert bounds is not None, f"Variable {varname} has no bounds defined."
                 prior_rules.add(f"({varname}>={bounds.lb})")
                 prior_rules.add(f"({varname}<={bounds.ub})")
                 

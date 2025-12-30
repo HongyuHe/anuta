@@ -477,7 +477,7 @@ class Yatesbury(Constructor):
         self.df['SrcPt'] = self.df['SrcPt'].apply(cidds_port_map)
         self.df['DstPt'] = self.df['DstPt'].apply(cidds_port_map)
         self.df['FlowDir'] = self.df['FlowDir'].apply(yatesbury_direction_map)
-        self.df['Proto'] = self.df['Proto'].apply(yatesbury_proto_map)
+        self.df['Proto'] = self.df['Proto'].apply(proto_map)
         # self.df['Decision'] = self.df['Decision'].apply(yatesbury_decision_map)
         self.df['FlowState'] = self.df['FlowState'].apply(yatesbury_flowstate_map)
         self.df = self.df.astype(int)
@@ -1274,6 +1274,71 @@ class Cidds001(Constructor):
         return indexset, fcount
         
 
+class AbrState(Constructor):
+    def __init__(self, filepath) -> None:
+        super().__init__()
+        self.label = 'abr'
+        log.info(f"Loading data from {filepath}")
+        self.df: pd.DataFrame = pd.read_csv(filepath)
+        cols = ['bitrate_kbps','buffer_seconds','throughput_mbps', 'delay_ms', 'chosen_chunk_bytes']
+        self.df = self.df[cols]
+        col_to_var = {col: to_big_camelcase(col, '_') for col in self.df.columns}
+        self.df.rename(columns=col_to_var, inplace=True)
+        variables = list(self.df.columns)
+        # Ensure numeric columns (drop rows that cannot be coerced).
+        for col in variables:
+            self.df[col] = pd.to_numeric(self.df[col], errors="coerce")
+        before = len(self.df)
+        self.df = self.df.dropna(subset=variables).reset_index(drop=True)
+        if len(self.df) != before:
+            log.warning(f"[ABR] Dropped {before - len(self.df)} rows with non-numeric/NaN values in required columns.")
+
+        self.colvars = {var: {var} for var in variables}
+        self.categoricals = ['BitrateKbps']
+        self.feature_marker = ''
+        self.constants: dict[str, Constants] = {}
+
+        self.multiconstants: List[Tuple[str, Constants]] = []
+        # Unit conversion scalars used in ABR templates.
+        self.multiconstants.append(('ThroughputMbps', Constants(kind=ConstantType.SCALAR, values=[1000])))
+        self.multiconstants.append(('ChosenChunkBytes', Constants(kind=ConstantType.SCALAR, values=[8])))
+
+        # Useful per-variable thresholds.
+        for var in variables:
+            try:
+                quantiles = get_quantiles(self.df[var], quantiles=[0.99, 0.95, 0.75, 0.5, 0.25])
+            except Exception:
+                continue
+            if quantiles:
+                self.multiconstants.append((var, Constants(kind=ConstantType.LIMIT, values=quantiles)))
+
+        # # Bitrate is typically discrete; expose common values for equality predicates.
+        # top_values = self.df['BitrateKbps'].value_counts().nlargest(10).index.tolist()
+        # if top_values:
+        #     self.multiconstants.append(('BitrateKbps', Constants(kind=ConstantType.ASSIGNMENT, values=top_values)))
+
+        domains: Dict[str, Domain] = {}
+        for name in variables:
+            if name not in self.categoricals:
+                if pd.api.types.is_integer_dtype(self.df[name]):
+                    domains[name] = Domain(DomainType.INTEGER,
+                                           Bounds(self.df[name].min().item(),
+                                                  self.df[name].max().item()),
+                                           None)
+                else:
+                    domains[name] = Domain(DomainType.REAL,
+                                           Bounds(self.df[name].min().item(),
+                                                  self.df[name].max().item()),
+                                           None)
+            else:
+                domains[name] = Domain(DomainType.CATEGORICAL, 
+                                      None, 
+                                      self.df[name].unique())
+        
+        self.domains = domains
+        self.anuta = Anuta(variables, self.domains, constants=self.constants, multiconstants=self.multiconstants)
+        return   
+        
 class Millisampler(Constructor):
     def __init__(self, filepath) -> None:
         super().__init__()

@@ -49,10 +49,10 @@ def detector(
         args = [(i, partition, path_to_rules, domain_kinds) for i, partition in enumerate(dfpartitions)]
         pool = Pool(core_count)
         log.info("Detecting violations in parallel ...")
-        worker_outputs = pool.starmap(detect_partition, args)
+        worker_outputs = pool.starmap(detect, args)
         pool.close()
     else:
-        worker_outputs = [detect_partition(0, df, path_to_rules, domain_kinds)]
+        worker_outputs = [detect(0, df, path_to_rules, domain_kinds)]
     
     sample_partitions, worker_times = zip(*worker_outputs)
     sample_violations = np.concatenate(sample_partitions)
@@ -97,7 +97,7 @@ def _build_evalmap(domain_kinds: Dict[str, DomainType]) -> Dict[str, Any]:
             evalmap[varname] = z3.Int(varname)
     return evalmap
 
-def detect_partition(
+def detect(
     worker_idx: int,
     dfpartition: pd.DataFrame,
     rulepath: str,

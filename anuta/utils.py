@@ -31,7 +31,6 @@ formatter = logging.Formatter(
 handler.setFormatter(formatter)
 log.addHandler(handler)
 
-
 #* Mapping Sympy to Z3 operators:
 def z3eq(a, b): return a == b
 def z3ne(a, b): return a != b

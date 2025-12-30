@@ -14,6 +14,10 @@ def get_config():
     default_config.STALL_TIMEOUT_SEC = 2 * 60 * 60
     #* Enable type-based variable suppression
     default_config.ENABLE_TYPE_SUPPRESSION = False
+    #* Numeric tolerance for predicate evaluation (0 disables).
+    #* For Eq/Ne over numeric expressions, use math.isclose/np.isclose with these tolerances.
+    default_config.NUMERIC_EQ_RTOL = 1e-6
+    default_config.NUMERIC_EQ_ATOL = 1e-6
     
     #* Number of epochs for levelwise learning
     default_config.LEVELWISE_EPOCHS = 10

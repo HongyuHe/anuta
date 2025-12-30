@@ -8,7 +8,7 @@ def proto_map(proto: str):
     proto = proto.lower()
     if len(proto) == 1:
         proto = 'tcp' if proto == 't' else 'udp' if proto == 'u' else 'icmp' if proto == 'i' else proto
-        assert proto in PROTOS, f"Unknown protocol: {proto}"
+        assert proto in PROTOS.inverse, f"Unknown protocol: {proto}"
     
     return PROTOS.inverse[proto]
 
@@ -121,7 +121,7 @@ metadc_ints = ['IngressBytesAgg','EgressBytesAgg','InRxmitBytesAgg','OutRxmitByt
 yatesbury_categoricals = ["SrcIp", "DstIp", "SrcPt", "DstPt", 
                         "Proto", "FlowDir", "Decision", "FlowState", "Label"]
 yatesbury_numericals = ["PktSent", "BytesSent", "PktRecv", "BytesRecv"]
-#* Gurantee ordering (https://github.com/microsoft/Yatesbury?tab=readme-ov-file#dataset-description)
+#* Guarantee ordering (https://github.com/microsoft/Yatesbury?tab=readme-ov-file#dataset-description)
 yatesbury_direction_conversion = bidict({direction: i for i, direction in enumerate(['I', 'O'])})
 yatesbury_proto_conversion = bidict({proto: i for i, proto in enumerate(['T', 'U'])})
 yatesbury_decision_conversion = bidict({decision: i for i, decision in enumerate(['A', 'D'])})
