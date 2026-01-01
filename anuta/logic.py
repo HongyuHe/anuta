@@ -509,9 +509,19 @@ class LogicLearner(object):
         
         Iterative stack-based DFS (no recursion).
         Prunes branches whose disjunction is tautological (e.g., conflicting Ne or complementary bounds).
+
+        Size scheduling
+        ---------------
+        If `max_size` is provided and >2, the search is run with an increasing size bound:
+          - start with `current_max_size = 2` (or `max_size` if `max_size < 2`)
+          - whenever the search under the current bound is exhausted, or the stall timeout triggers,
+            bump `current_max_size += 1` (up to `max_size`) and restart the DFS.
+
+        Note: restarting avoids retaining a potentially enormous "frontier" of pruned states in memory
+        when increasing the size bound.
         """
         if not evidence_sets:
-            return []
+            return [], "exhausted"
 
         # Build idx_by_pred: Map<Predicate, Set<EvidenceSetIndices>>
         idx_by_pred: Dict[Constraint, Set[int]] = defaultdict(set)
@@ -528,7 +538,7 @@ class LogicLearner(object):
         if empty_esets:
             log.warning(f"Found {len(empty_esets)} empty evidence sets out of {len(evidence_sets)}.")
             log.warning("Problem is unsatisfiable due to one or more empty evidence sets.")
-            return []
+            return [], "unsatisfiable"
 
         # All evidence sets that must be covered (all of them, since empty_esets is 0)
         FULL = set(range(len(evidence_sets)))
@@ -775,119 +785,159 @@ class LogicLearner(object):
             new_info[var] = var_info
             return new_info
 
-        def _run_search(seed: Optional[int]) -> Tuple[Set[int], str]:
-            rng = random.Random(seed)
-            solutions_added = 0
+        # Size scheduling
+        target_max_size = max_size
+        current_max_size: Optional[int]
+        if target_max_size is None:
+            current_max_size = None
+        else:
+            current_max_size = 2 if target_max_size > 2 else target_max_size
 
-            # frame: (chosen, chosen_mask, covered, uncovered, chosen_info, candidates, next_idx)
-            stack = [(set(), 0, set(), FULL, {}, None, 0)]
+        progress = tqdm(
+            desc=f"... Enumerating hitting sets (max_size={current_max_size})",
+            unit=" sets",
+            total=max_solutions,
+        )
 
-            start_time = perf_counter()
-            last_solution_time = perf_counter()
-            stop_reason = "exhausted"
+        rng = random.Random(None)
 
-            while stack:
-                #* --- Global Timeouts ---
-                if perf_counter() - start_time > cfg.TIMEOUT_SEC:
-                    log.warning(f"Learning timed out after {cfg.TIMEOUT_SEC//60}min.")
-                    stop_reason = "timeout"
-                    break
-                
-                # stall timeout
-                if perf_counter() - last_solution_time > cfg.STALL_TIMEOUT_SEC:
-                    log.warning(f"Search stalled for {cfg.STALL_TIMEOUT_SEC//60}min. Stopping.")
-                    stop_reason = "stall_timeout"
-                    break
-
-                chosen, chosen_mask, covered, uncovered, chosen_info, candidates, next_idx = stack.pop()
-
-                # If we already contain a known minimal solution, any extension is a non-minimal superset.
-                if chosen_mask and _has_subset(chosen_mask):
-                    continue
-
-                #* --- SOLUTION FOUND (Optimized) ---
-                if not uncovered:
-                    if chosen_mask and _add_solution(chosen_mask):
-                        solutions_added += 1
-                        last_solution_time = perf_counter()
-                        # Track the number of *current* minimal solutions (not total additions),
-                        # since `_add_solution` may remove dominated supersets.
-                        progress.n = len(global_solution_masks)
-                        progress.refresh()
-
-                        if max_solutions and len(global_solution_masks) >= max_solutions:
-                            stop_reason = "max_solutions"
-                            return set(global_solution_masks), stop_reason
-                    continue
-
-                #* --- PRUNING ---
-                if max_size is not None and len(chosen) >= max_size:
-                    continue
-
-                if max_size is not None:
-                    lb = _optimistic_lb(uncovered)
-                    if len(chosen) + lb > max_size:
-                        continue
-
-                #* --- CANDIDATE GENERATION (Optimized) ---
-                if candidates is None:
-                    pivot = _pick_pivot(uncovered)
-                    
-                    scored_candidates: List[Tuple[int, Constraint]] = []
-                    for p in evidence_sets[pivot]:
-                        if _is_tautological_with(chosen_info, p):
-                            continue
-                        gain = len(idx_by_pred[p] & uncovered)
-                        if gain == 0:
-                            continue
-                        scored_candidates.append((gain, p))
-                    if not scored_candidates:
-                        continue
-                    # Sort candidates to explore most promising branches first; tie-break with RNG for diversity.
-                    scored_candidates.sort(key=lambda gp: (-gp[0], rng.random()))
-                    candidates = [p for _, p in scored_candidates]
-                    next_idx = 0
-
-                # Backtracking: exhausted all candidates for this pivot
-                if next_idx >= len(candidates):
-                    continue
-
-                #* --- STACK PUSH (Branch 1: "Don't choose p") ---
-                # This state explores solutions *without* candidates[next_idx]
-                stack.append((chosen, chosen_mask, covered, uncovered, chosen_info, candidates, next_idx + 1))
-
-                #* --- STACK PUSH (Branch 2: "Choose p") ---
-                p = candidates[next_idx]
-
-                new_chosen = set(chosen)
-                new_chosen.add(p)
-                new_chosen_mask = chosen_mask | (1 << pred_to_bit[p])
-
-                new_covered = covered | idx_by_pred[p]
-                new_info = _extend_chosen_info(chosen_info, p)
-                new_uncovered = uncovered - idx_by_pred[p]
-
-                stack.append((new_chosen, new_chosen_mask, new_covered, new_uncovered, new_info, None, 0))
-
-            if stop_reason == "exhausted" and max_solutions is not None:
-                log.info(
-                    f"Search exhausted: found {len(global_solution_masks)}/{max_solutions} minimal hitting sets "
-                    f"(added {solutions_added} total candidate solutions)."
-                )
-            return set(global_solution_masks), stop_reason
-
-        progress = tqdm(desc=f"... Enumerating hitting sets (max_size={max_size})",
-                        unit=" sets", total=max_solutions)
-
+        overall_start_time = perf_counter()
         stop_reason = "unknown"
+
         try:
-            merged_masks, stop_reason = _run_search(None)
+            while True:
+                # frame: (chosen, chosen_mask, covered, uncovered, chosen_info, candidates, next_idx)
+                stack: List[
+                    Tuple[
+                        Set[Constraint],
+                        int,
+                        Set[int],
+                        Set[int],
+                        Dict[str, Dict[str, Any]],
+                        Optional[List[Constraint]],
+                        int,
+                    ]
+                ] = [(set(), 0, set(), FULL, {}, None, 0)]
+
+                stage_last_solution_time = perf_counter()
+                stage_stop_reason = "exhausted"
+
+                while stack:
+                    now = perf_counter()
+                    if now - overall_start_time > cfg.TIMEOUT_SEC:
+                        log.warning(f"Learning timed out after {cfg.TIMEOUT_SEC//60}min.")
+                        stage_stop_reason = "timeout"
+                        break
+
+                    if now - stage_last_solution_time > cfg.STALL_TIMEOUT_SEC:
+                        log.warning(
+                            f"Search stalled for {cfg.STALL_TIMEOUT_SEC//60}min at max_size={current_max_size}."
+                        )
+                        stage_stop_reason = "stall_timeout"
+                        break
+
+                    chosen, chosen_mask, covered, uncovered, chosen_info, candidates, next_idx = stack.pop()
+
+                    # If we already contain a known minimal solution, any extension is a non-minimal superset.
+                    if chosen_mask and _has_subset(chosen_mask):
+                        continue
+
+                    #* --- SOLUTION FOUND (Optimized) ---
+                    if not uncovered:
+                        if chosen_mask and _add_solution(chosen_mask):
+                            stage_last_solution_time = perf_counter()
+                            # Track the number of *current* minimal solutions (not total additions),
+                            # since `_add_solution` may remove dominated supersets.
+                            progress.n = len(global_solution_masks)
+                            progress.refresh()
+
+                            if max_solutions and len(global_solution_masks) >= max_solutions:
+                                stage_stop_reason = "max_solutions"
+                                break
+                        continue
+
+                    #* --- PRUNING ---
+                    if current_max_size is not None and len(chosen) >= current_max_size:
+                        continue
+
+                    if current_max_size is not None:
+                        lb = _optimistic_lb(uncovered)
+                        if len(chosen) + lb > current_max_size:
+                            continue
+
+                    #* --- CANDIDATE GENERATION (Optimized) ---
+                    if candidates is None:
+                        pivot = _pick_pivot(uncovered)
+
+                        scored_candidates: List[Tuple[int, Constraint]] = []
+                        for p in evidence_sets[pivot]:
+                            if _is_tautological_with(chosen_info, p):
+                                continue
+                            gain = len(idx_by_pred[p] & uncovered)
+                            if gain == 0:
+                                continue
+                            scored_candidates.append((gain, p))
+                        if not scored_candidates:
+                            continue
+                        # Sort candidates to explore most promising branches first; tie-break with RNG for diversity.
+                        scored_candidates.sort(key=lambda gp: (-gp[0], rng.random()))
+                        candidates = [p for _, p in scored_candidates]
+                        next_idx = 0
+
+                    # Backtracking: exhausted all candidates for this pivot
+                    if next_idx >= len(candidates):
+                        continue
+
+                    #* --- STACK PUSH (Branch 1: "Don't choose p") ---
+                    # This state explores solutions *without* candidates[next_idx]
+                    stack.append((chosen, chosen_mask, covered, uncovered, chosen_info, candidates, next_idx + 1))
+
+                    #* --- STACK PUSH (Branch 2: "Choose p") ---
+                    p = candidates[next_idx]
+
+                    new_chosen = set(chosen)
+                    new_chosen.add(p)
+                    new_chosen_mask = chosen_mask | (1 << pred_to_bit[p])
+
+                    new_covered = covered | idx_by_pred[p]
+                    new_info = _extend_chosen_info(chosen_info, p)
+                    new_uncovered = uncovered - idx_by_pred[p]
+
+                    stack.append((new_chosen, new_chosen_mask, new_covered, new_uncovered, new_info, None, 0))
+
+                stop_reason = stage_stop_reason
+
+                if stop_reason in ("max_solutions", "timeout"):
+                    break
+
+                if stop_reason not in ("exhausted", "stall_timeout"):
+                    break
+
+                if current_max_size is None or target_max_size is None:
+                    break
+
+                if current_max_size >= target_max_size:
+                    break
+
+                prev = current_max_size
+                current_max_size += 1
+                if stop_reason == "exhausted":
+                    log.info(f"Search exhausted at max_size={prev}; increasing to {current_max_size}.")
+                else:
+                    log.warning(
+                        f"Search stalled at max_size={prev}; increasing to {current_max_size}."
+                    )
+                progress.set_description(f"... Enumerating hitting sets (max_size={current_max_size})")
+                # Continue to the next stage (restart DFS with the new bound).
+                continue
+
         except KeyboardInterrupt:
             stop_reason = "keyboard_interrupt"
             log.warning("\nSearch interrupted by user (Ctrl+C). Returning partial results.")
-            merged_masks = set(global_solution_masks)
         finally:
             progress.close()  # Ensure progress bar is always closed
+
+        merged_masks = set(global_solution_masks)
 
         # Convert final solution masks to List[Set[Constraint]]
         solutions: List[Set[Constraint]] = []

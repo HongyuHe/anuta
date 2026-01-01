@@ -11,7 +11,7 @@ def get_config():
     #* Maximum number of rules to learn
     default_config.MAX_RULES = 50_000
     #* Stop if no improvement in this many seconds
-    default_config.STALL_TIMEOUT_SEC = 2 * 60 * 60
+    default_config.STALL_TIMEOUT_SEC = 1 * 60 * 60
     #* Enable type-based variable suppression
     default_config.ENABLE_TYPE_SUPPRESSION = False
     #* Numeric tolerance for predicate evaluation (0 disables).
