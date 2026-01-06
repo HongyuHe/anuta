@@ -715,30 +715,127 @@ class LogicLearner(object):
                 return False
             return False
 
+        META_KEY = "__meta__"
+        NEGATED_ID_CONJ_KEY = "negated_identifier_conjunctions"
+
+        @lru_cache(maxsize=None)
+        def _extract_negated_identifier_conjunction(
+            p: Constraint,
+        ) -> Optional[Tuple[Tuple[str, Any], ...]]:
+            """
+            Detect predicates of the form:
+              Not(And(Eq(v1,c1), Eq(v2,c2), ...))
+
+            where all variables are identifier-like (IP/PORT/PROTO). These come from the
+            5-tuple compound predicate generation and can create tautological disjunctions
+            such as: ~FlowX | ~FlowY (since FlowX and FlowY are mutually exclusive).
+
+            Returns a canonical tuple of (var, value) pairs (sorted by var) if matched.
+            """
+            expr = p.expr
+            if not isinstance(expr, sp.Not):
+                return None
+            inner = expr.args[0]
+            if not isinstance(inner, sp.And):
+                return None
+
+            assignments: List[Tuple[str, Any]] = []
+            for arg in inner.args:
+                if not isinstance(arg, sp.Eq):
+                    return None
+                a, b = arg.args
+
+                var: Optional[str] = None
+                val: Any = None
+                if getattr(a, "is_Symbol", False) and not getattr(b, "is_Symbol", False):
+                    var = str(a)
+                    val = b
+                elif getattr(b, "is_Symbol", False) and not getattr(a, "is_Symbol", False):
+                    var = str(b)
+                    val = a
+                else:
+                    return None
+
+                if self.vtypes.get(var) not in (VariableType.IP, VariableType.PORT, VariableType.PROTO):
+                    return None
+                assignments.append((var, val))
+
+            # Require at least 2 equalities to avoid catching trivial unary cases.
+            if len(assignments) < 2:
+                return None
+            return tuple(sorted(assignments, key=lambda kv: kv[0]))
+
+        def _conflicts_on_assignment(
+            a: Tuple[Tuple[str, Any], ...],
+            b: Tuple[Tuple[str, Any], ...],
+        ) -> bool:
+            """True iff `a` and `b` assign different values to any shared variable."""
+            a_map = dict(a)
+            for var, val in b:
+                if var in a_map and a_map[var] != val:
+                    return True
+            return False
+
         def _is_tautological_with(chosen_info: Dict[str, Dict[str, Any]], p: Constraint) -> bool:
+            neg_conj = _extract_negated_identifier_conjunction(p)
+            if neg_conj:
+                # A OR ¬(A ∧ ...) is always True. If any conjunct Eq(var,val) is already chosen,
+                # adding this negated conjunction makes the disjunction tautological.
+                for var, val in neg_conj:
+                    info = chosen_info.get(var)
+                    if info and val in info.get("eq", ()):
+                        return True
+
+                meta = chosen_info.get(META_KEY, {})
+                prior_conjs = meta.get(NEGATED_ID_CONJ_KEY, [])
+                for prior in prior_conjs:
+                    if _conflicts_on_assignment(prior, neg_conj):
+                        # ¬A ∨ ¬B is a tautology when A ∧ B is unsatisfiable.
+                        return True
+                return False
+
             sig = signature_by_pred.get(p)
             if sig is None:
                 sig = _extract_signature(p)
             if not sig:
                 return False
             var, kind, rhs, inclusive = sig
+            meta = chosen_info.get(META_KEY, {})
+
+            if kind == "eq":
+                # Eq(var, c) OR ¬(Eq(var, c) ∧ ...) is always True (absorption).
+                for prior in meta.get(NEGATED_ID_CONJ_KEY, []):
+                    if (var, rhs) in prior:
+                        return True
+
             info = chosen_info.get(var)
             if not info:
                 return False
 
             if kind == "eq":
-                return rhs in info["ne"]
+                # Eq(X, c) OR Ne(X, c) is a tautology.
+                if rhs in info["ne"]:
+                    return True
+                # Eq(X, c) OR (X > c) OR (X < c) is also a tautology, but requires 3 literals.
+                # Detect it when Eq is the last piece being added.
+                has_strict_lower = any(lb == rhs and not linc for lb, linc in info["lower"])
+                has_strict_upper = any(ub == rhs and not uinc for ub, uinc in info["upper"])
+                return has_strict_lower and has_strict_upper
 
             if kind == "ne":
                 if rhs in info["eq"]:
                     return True
-                #* Any additional Ne on the same variable makes OR tautological.
-                #*  E.g., Ne(X, x1) ∨ Ne(X, x2) is always true for any X.
+                # Any additional Ne on the same variable makes OR tautological.
+                # E.g., Ne(X, a) OR Ne(X, b) is always true for any X.
                 return bool(info["ne"])
 
             if kind == "lower":
                 for ub, uinc in info["upper"]:
                     if _interval_covers_all(rhs, inclusive, ub, uinc):
+                        return True
+                    # (X > c) OR (X < c) is equivalent to Ne(X, c) and is usually uninformative
+                    # for numeric variables (it only excludes the single value c).
+                    if ub == rhs and (not inclusive) and (not uinc):
                         return True
                 return False
 
@@ -746,11 +843,33 @@ class LogicLearner(object):
                 for lb, linc in info["lower"]:
                     if _interval_covers_all(lb, linc, rhs, inclusive):
                         return True
+                    # (X > c) OR (X < c) is equivalent to Ne(X, c) and is usually uninformative
+                    # for numeric variables (it only excludes the single value c).
+                    if lb == rhs and (not inclusive) and (not linc):
+                        return True
                 return False
 
             return False
 
         def _extend_chosen_info(chosen_info: Dict[str, Dict[str, Any]], p: Constraint) -> Dict[str, Dict[str, Any]]:
+            neg_conj = _extract_negated_identifier_conjunction(p)
+            if neg_conj:
+                meta_existing = chosen_info.get(META_KEY)
+                if meta_existing is None:
+                    meta = {NEGATED_ID_CONJ_KEY: [neg_conj]}
+                    if not chosen_info:
+                        return {META_KEY: meta}
+                    new_info = dict(chosen_info)
+                    new_info[META_KEY] = meta
+                    return new_info
+
+                prior_conjs_existing = meta_existing.get(NEGATED_ID_CONJ_KEY, [])
+                meta = dict(meta_existing)
+                meta[NEGATED_ID_CONJ_KEY] = list(prior_conjs_existing) + [neg_conj]
+                new_info = dict(chosen_info)
+                new_info[META_KEY] = meta
+                return new_info
+
             sig = signature_by_pred.get(p)
             if sig is None:
                 sig = _extract_signature(p)
@@ -1195,17 +1314,21 @@ class LogicLearner(object):
             with open(evidence_sets_file, 'rb') as f:
                 evidence_sets = pickle.load(f)
             log.info(f"Loaded {len(evidence_sets)} evidence sets.")
-        
-            missing_predicates = set()
-            # ! Below check doesn't consider contradictory predicates that no example can satisfy.
-            existing_predicates = [_predicates for _predicates in 
-                                tqdm(evidence_sets,
-                                        desc="... Collecting existing predicates from evidence sets")]
-            missing_predicates = predicates - set().union(*existing_predicates)
-            if missing_predicates:
-                log.warning(f"Missing {len(missing_predicates)} predicates in the evidence set (usually invalid ones).")
+
+            supported: Set[Constraint] = set()
+            for s in tqdm(evidence_sets, desc="... Collecting supported predicates from evidence sets"):
+                supported.update(s)
+
+            before = len(predicates)
+            predicates.intersection_update(supported)
+            dropped = before - len(predicates)
+            if dropped:
+                log.warning(
+                    f"Pruned {dropped} predicates with empty evidence sets "
+                    f"(not satisfied by any example in this cached run)."
+                )
             else:
-                log.info("All predicates already covered in the evidence sets.")
+                log.info("All predicates are supported by at least one example.")
             return evidence_sets
             
         predicates_list = list(predicates) # list() if not missing_predicates else list(missing_predicates)
@@ -1229,7 +1352,7 @@ class LogicLearner(object):
                     #     continue
                 # if not satisfied:
                 #     log.warning(f"Example {row.name} satisfied no predicates.")
-                assert satisfied, f"Example {row.name} satisfied no predicates. Improve predicate space!!!"
+                # assert satisfied, f"Example {row.name} satisfied no predicates. Improve predicate space!!!"
                 chunk_results.append(satisfied)
             return chunk_results
 
@@ -1246,6 +1369,15 @@ class LogicLearner(object):
         )
         
         results: List[Set[Constraint]] = [s for chunk in results for s in chunk]  # Flatten list of lists
+        # Prune predicates that were never satisfied by any example.
+        supported: Set[Constraint] = set()
+        for s in results:
+            supported.update(s)
+        before = len(predicates)
+        predicates.intersection_update(supported)
+        dropped = before - len(predicates)
+        if dropped:
+            log.warning(f"Pruned {dropped} predicates with empty evidence sets (zero support).")
         #* Merge with existing evidence sets if any
         if evidence_sets:
             if len(evidence_sets) != len(results):
@@ -1658,6 +1790,119 @@ class LogicLearner(object):
             abr_preds, abr_priors = self._generate_abr_template_predicates()
             predicates |= abr_preds
             prior_rules |= abr_priors
+
+        # ---------------------------------------------------------------------
+        # Compound predicate generation
+        # ---------------------------------------------------------------------
+        # Snapshot the base predicate set (pre-compounds) so we only build 2-way
+        # conjunctions from atomic predicates, not from already-compounded ones.
+        base_predicates: List[str] = sorted(predicates)
+
+        def _format_const(val: Any) -> str:
+            if isinstance(val, (np.integer, int)):
+                return str(int(val))
+            if isinstance(val, (np.floating, float)):
+                v = float(val)
+                if math.isfinite(v) and v.is_integer():
+                    return str(int(v))
+                return str(v)
+            return str(val)
+
+        five_tuple_identifier_vars: Set[str] = {
+            var
+            for var in self.vtypes
+            if var in self.examples.columns
+            and self.vtypes[var] in (VariableType.IP, VariableType.PORT, VariableType.PROTO)
+        }
+
+        # (1) Five-tuple conjunction predicates: AND of Eq over (SrcIp, DstIp, SrcPt, DstPt, Proto)
+        # Variable names may vary; use VariableType + name heuristics to identify roles.
+        ip_vars = [v for v in self.variables if self.vtypes.get(v) == VariableType.IP]
+        port_vars = [v for v in self.variables if self.vtypes.get(v) == VariableType.PORT]
+        proto_vars = [v for v in self.variables if self.vtypes.get(v) == VariableType.PROTO]
+
+        def _pick_by_keywords(candidates: List[str], keywords: Tuple[str, ...]) -> Optional[str]:
+            for kw in keywords:
+                for name in candidates:
+                    if kw in name.lower():
+                        return name
+            return None
+
+        src_ip = _pick_by_keywords(ip_vars, ("src", "source", "orig", "client"))
+        dst_ip = _pick_by_keywords(ip_vars, ("dst", "dest", "destination", "resp", "server"))
+        if src_ip is None or dst_ip is None:
+            if len(ip_vars) == 2:
+                src_ip, dst_ip = ip_vars[0], ip_vars[1]
+
+        src_pt = _pick_by_keywords(port_vars, ("src", "source", "orig", "client"))
+        dst_pt = _pick_by_keywords(port_vars, ("dst", "dest", "destination", "resp", "server"))
+        if src_pt is None or dst_pt is None:
+            if len(port_vars) == 2:
+                src_pt, dst_pt = port_vars[0], port_vars[1]
+
+        proto = _pick_by_keywords(proto_vars, ("proto",)) or (proto_vars[0] if proto_vars else None)
+
+        max_five_tuples = int(getattr(cfg, "MAX_FIVE_TUPLE_PREDICATES", 50_000) or 0)
+        if src_ip and dst_ip and src_pt and dst_pt and proto:
+            tuple_cols = [src_ip, dst_ip, src_pt, dst_pt, proto]
+            if all(c in self.examples.columns for c in tuple_cols):
+                try:
+                    tuple_counts = self.examples[tuple_cols].value_counts(dropna=False)
+                except Exception:
+                    tuple_counts = None
+                if tuple_counts is not None:
+                    if max_five_tuples > 0:
+                        tuple_counts = tuple_counts.head(max_five_tuples)
+                    for values in tuple_counts.index:
+                        if not isinstance(values, tuple):
+                            values = (values,)
+                        parts = [
+                            f"Eq({col},{_format_const(val)})"
+                            for col, val in zip(tuple_cols, values)
+                        ]
+                        # predicates.add(f"And({','.join(parts)})")
+                        predicates.add(f"Not(And({','.join(parts)}))")
+                else:
+                    log.warning("[five-tuple] Failed to enumerate unique 5-tuples; skipping compound 5-tuple predicates.")
+        else:
+            if ip_vars or port_vars or proto_vars:
+                log.warning(
+                    f"[five-tuple] Could not identify full 5-tuple variables "
+                    f"(ip={ip_vars}, port={port_vars}, proto={proto_vars}); skipping 5-tuple conjunction predicates."
+                )
+
+        # # (2) Pairwise conjunction predicates (AND) for non-five-tuple predicates.
+        # # Only combine predicates with disjoint variable sets (no shared variables).
+        # max_pairwise = int(getattr(cfg, "MAX_PAIRWISE_PREDICATES", 200_000) or 0)
+        # eligible: List[Tuple[str, FrozenSet[str]]] = []
+        # for p in base_predicates:
+        #     try:
+        #         expr = sp.sympify(p)
+        #     except Exception:
+        #         continue
+        #     if expr in (sp.true, sp.false):
+        #         continue
+        #     vars_in_p = frozenset(str(s) for s in expr.free_symbols)
+        #     if not vars_in_p:
+        #         continue
+        #     if vars_in_p & five_tuple_identifier_vars:
+        #         continue
+        #     eligible.append((p, vars_in_p))
+
+        # pairwise_added = 0
+        # for i in range(len(eligible)):
+        #     p1, v1 = eligible[i]
+        #     for j in range(i + 1, len(eligible)):
+        #         p2, v2 = eligible[j]
+        #         if v1 & v2:
+        #             continue
+        #         predicates.add(f"And({p1},{p2})")
+        #         pairwise_added += 1
+        #         if max_pairwise > 0 and pairwise_added >= max_pairwise:
+        #             log.warning(f"Reached MAX_PAIRWISE_PREDICATES={max_pairwise}; truncating pairwise conjunction predicates.")
+        #             break
+        #     if max_pairwise > 0 and pairwise_added >= max_pairwise:
+        #         break
 
         # prior_rules = set()
         '''Add domain constraints to prior rules.'''

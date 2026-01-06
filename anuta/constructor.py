@@ -487,92 +487,6 @@ class Yatesbury(Constructor):
         quantiles = [0.99, 0.95, 0.75, 0.5, 0.25]
         topk = 5
 
-        def _gmm_limit_constants(varname: str, series: pd.Series) -> List[int]:
-            """
-            Fit a 1D Gaussian Mixture Model and pick #components by minimum BIC.
-            Returns the selected Gaussian means (sorted) as LIMIT constants.
-            """
-            try:
-                import warnings
-                from sklearn.mixture import GaussianMixture
-                from sklearn.exceptions import ConvergenceWarning
-            except Exception as exc:
-                log.warning(f"(Yatesbury) sklearn not available for GMM limits ({varname}): {exc}")
-                return []
-
-            values = pd.to_numeric(series, errors="coerce").dropna()
-            if values.empty:
-                return []
-
-            X = values.to_numpy(dtype=float).reshape(-1, 1)
-            is_integer = pd.api.types.is_integer_dtype(series)
-            vmin = float(values.min())
-            vmax = float(values.max())
-
-            # Keep fitting cost bounded (BIC requires multiple GMM fits).
-            sample_size = 200_000_000_000
-            if X.shape[0] > sample_size:
-                rng = np.random.default_rng(42)
-                idx = rng.choice(X.shape[0], size=sample_size, replace=False)
-                X_fit = X[idx]
-            else:
-                X_fit = X
-
-            unique_count = np.unique(X_fit).size
-            if unique_count <= 1:
-                single = float(X_fit[0, 0])
-                if is_integer:
-                    return [int(round(single))]
-                return [int(round(single))]
-
-            max_components = min(10, unique_count)
-
-            best_bic = float("inf")
-            best_gmm = None
-            for k in range(1, max_components + 1):
-                try:
-                    gmm = GaussianMixture(
-                        n_components=k,
-                        covariance_type="full",
-                        reg_covar=1e-6,
-                        random_state=42,
-                        n_init=1,
-                        max_iter=200,
-                    )
-                    with warnings.catch_warnings():
-                        warnings.filterwarnings("ignore", category=ConvergenceWarning)
-                        gmm.fit(X_fit)
-                    bic = float(gmm.bic(X_fit))
-                except Exception:
-                    continue
-                if bic < best_bic:
-                    best_bic = bic
-                    best_gmm = gmm
-
-            if best_gmm is None:
-                return []
-
-            means = sorted(float(m) for m in best_gmm.means_.reshape(-1))
-            # Round/dedup for stable predicate strings.
-            deduped: List[int] = []
-            for m in means:
-                if is_integer:
-                    m_int = int(round(m))
-                    # Clamp to observed bounds to avoid any numerical drift.
-                    if m_int < vmin:
-                        m_int = int(vmin)
-                    elif m_int > vmax:
-                        m_int = int(vmax)
-                    if not deduped or m_int != deduped[-1]:
-                        deduped.append(m_int)
-                else:
-                    # Yatesbury numericals are integer-typed, but keep a safe fallback.
-                    m_int = int(round(m))
-                    if not deduped or m_int != deduped[-1]:
-                        deduped.append(m_int)
-            log.info(f"(Yatesbury) {varname}: selected {len(deduped)} GMM means via BIC.")
-            return deduped
-
         for name in variables:
             if 'ip' in name.lower():
                 multiconstants.append(
@@ -584,48 +498,48 @@ class Yatesbury(Constructor):
                     (name, Constants(kind=ConstantType.ASSIGNMENT, values=cidds_ports))
                 )
             if 'pkt' in name.lower():
-                # --- Replaced implementation (kept for reference) ---
-                # quantiles_values = get_quantiles(self.df[name], quantiles)
-                # multiconstants.append(
-                #     (name, Constants(kind=ConstantType.LIMIT, values=quantiles_values))
-                # )
+                # Percentile-based LIMIT constants.
+                quantiles_values = get_quantiles(self.df[name], quantiles)
+                multiconstants.append(
+                    (name, Constants(kind=ConstantType.LIMIT, values=quantiles_values))
+                )
 
-                # New: LIMIT constants from a per-variable GMM, #components chosen by BIC.
-                gmm_means = _gmm_limit_constants(name, self.df[name])
-                if gmm_means:
-                    multiconstants.append(
-                        (name, Constants(kind=ConstantType.LIMIT, values=gmm_means))
-                    )
-                else:
-                    # Fallback if GMM fit fails.
-                    fallback_quantiles = get_quantiles(self.df[name], quantiles)
-                    multiconstants.append(
-                        (name, Constants(kind=ConstantType.LIMIT, values=fallback_quantiles))
-                    )
+                # --- Disabled: GMM-based LIMIT constants (moved to anuta/utils.py, commented out) ---
+                # gmm_means = _gmm_limit_constants(name, self.df[name])
+                # if gmm_means:
+                #     multiconstants.append(
+                #         (name, Constants(kind=ConstantType.LIMIT, values=gmm_means))
+                #     )
+                # else:
+                #     # Fallback if GMM fit fails.
+                #     fallback_quantiles = get_quantiles(self.df[name], quantiles)
+                #     multiconstants.append(
+                #         (name, Constants(kind=ConstantType.LIMIT, values=fallback_quantiles))
+                #     )
 
                 top_packets = self.df[name].value_counts().nlargest(topk).index.tolist()
                 multiconstants.append(
                     (name, Constants(kind=ConstantType.ASSIGNMENT, values=top_packets))
                 )
             if 'bytes' in name.lower():
-                # --- Replaced implementation (kept for reference) ---
-                # quatiles = get_quantiles(self.df[name], quantiles)
-                # multiconstants.append(
-                #     (name, Constants(kind=ConstantType.LIMIT, values=quatiles))
-                # )
+                # Percentile-based LIMIT constants.
+                quantiles_values = get_quantiles(self.df[name], quantiles)
+                multiconstants.append(
+                    (name, Constants(kind=ConstantType.LIMIT, values=quantiles_values))
+                )
 
-                # New: LIMIT constants from a per-variable GMM, #components chosen by BIC.
-                gmm_means = _gmm_limit_constants(name, self.df[name])
-                if gmm_means:
-                    multiconstants.append(
-                        (name, Constants(kind=ConstantType.LIMIT, values=gmm_means))
-                    )
-                else:
-                    # Fallback if GMM fit fails.
-                    fallback_quantiles = get_quantiles(self.df[name], quantiles)
-                    multiconstants.append(
-                        (name, Constants(kind=ConstantType.LIMIT, values=fallback_quantiles))
-                    )
+                # --- Disabled: GMM-based LIMIT constants (moved to anuta/utils.py, commented out) ---
+                # gmm_means = _gmm_limit_constants(name, self.df[name])
+                # if gmm_means:
+                #     multiconstants.append(
+                #         (name, Constants(kind=ConstantType.LIMIT, values=gmm_means))
+                #     )
+                # else:
+                #     # Fallback if GMM fit fails.
+                #     fallback_quantiles = get_quantiles(self.df[name], quantiles)
+                #     multiconstants.append(
+                #         (name, Constants(kind=ConstantType.LIMIT, values=fallback_quantiles))
+                #     )
 
                 top_bytes = self.df[name].value_counts().nlargest(topk).index.tolist()
                 multiconstants.append(
@@ -1397,7 +1311,8 @@ class AbrState(Constructor):
         self.label = 'abr'
         log.info(f"Loading data from {filepath}")
         self.df: pd.DataFrame = pd.read_csv(filepath)
-        cols = ['bitrate_kbps','buffer_seconds','throughput_mbps', 'delay_ms', 'chosen_chunk_bytes']
+        # cols = ['bitrate_kbps','buffer_seconds','throughput_mbps', 'delay_ms', 'chosen_chunk_bytes']
+        cols = ['throughput_mbps', 'delay_ms', 'chosen_chunk_bytes']
         self.df = self.df[cols]
         col_to_var = {col: to_big_camelcase(col, '_') for col in self.df.columns}
         self.df.rename(columns=col_to_var, inplace=True)
@@ -1411,7 +1326,7 @@ class AbrState(Constructor):
             log.warning(f"[ABR] Dropped {before - len(self.df)} rows with non-numeric/NaN values in required columns.")
 
         self.colvars = {var: {var} for var in variables}
-        self.categoricals = ['BitrateKbps']
+        # self.categoricals = ['BitrateKbps']
         self.feature_marker = ''
         self.constants: dict[str, Constants] = {}
 
@@ -1420,14 +1335,13 @@ class AbrState(Constructor):
         self.multiconstants.append(('ThroughputMbps', Constants(kind=ConstantType.SCALAR, values=[1000])))
         self.multiconstants.append(('ChosenChunkBytes', Constants(kind=ConstantType.SCALAR, values=[8])))
 
-        # Useful per-variable thresholds.
-        for var in variables:
-            try:
-                quantiles = get_quantiles(self.df[var], quantiles=[0.99, 0.95, 0.75, 0.5, 0.25])
-            except Exception:
-                continue
-            if quantiles:
-                self.multiconstants.append((var, Constants(kind=ConstantType.LIMIT, values=quantiles)))
+        # for var in variables:
+        #     try:
+        #         quantiles = get_quantiles(self.df[var], quantiles=[0.99, 0.95, 0.75, 0.5, 0.25])
+        #     except Exception:
+        #         continue
+        #     if quantiles:
+        #         self.multiconstants.append((var, Constants(kind=ConstantType.LIMIT, values=quantiles)))
 
         # # Bitrate is typically discrete; expose common values for equality predicates.
         # top_values = self.df['BitrateKbps'].value_counts().nlargest(10).index.tolist()

@@ -20,8 +20,8 @@ attack_files=(
   "data/Yatesbury/portscan_attack.csv"
   "data/Yatesbury/synflood_attack.csv"
   "data/Yatesbury/botnet_attack.csv"
-#   "data/Yatesbury/dbinjection_attack.csv"
-#   "data/Yatesbury/dnsamp_attack.csv"
+  "data/Yatesbury/dbinjection_attack.csv"
+  "data/Yatesbury/dnsamp_attack.csv"
   "data/Yatesbury/ddosudp_attack.csv"
   "data/Yatesbury/unauthaccess_attack.csv"
 )

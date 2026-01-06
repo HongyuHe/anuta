@@ -5,13 +5,16 @@ def get_config():
     default_config = config_dict.ConfigDict()
     
     # 24 hours
-    default_config.TIMEOUT_SEC = 24 * 60 * 60
-    #* Maximum number of predicates in a rule
-    default_config.MAX_PREDICATES = 8
-    #* Maximum number of rules to learn
-    default_config.MAX_RULES = 50_000
+    default_config.TIMEOUT_SEC = 2 * 24 * 60 * 60
     #* Stop if no improvement in this many seconds
     default_config.STALL_TIMEOUT_SEC = 1 * 60 * 60
+    #* Maximum number of predicates in a rule
+    default_config.MAX_PREDICATES = 8
+    #* Predicate generation caps (0 disables the cap).
+    default_config.MAX_FIVE_TUPLE_PREDICATES = 0
+    default_config.MAX_PAIRWISE_PREDICATES = 0
+    #* Maximum number of rules to learn
+    default_config.MAX_RULES = 50_000
     #* Enable type-based variable suppression
     default_config.ENABLE_TYPE_SUPPRESSION = False
     #* Numeric tolerance for predicate evaluation (0 disables).

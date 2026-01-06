@@ -4,17 +4,29 @@ set -euo pipefail
 
 # RULES_PATH="denial_cidds_50000_p4_wk12norm_strictpreds_neg.pl"
 # RULES_PATH="fpgrowth_cidds_5000_wk12norm.pl"
-RULES_PATH="denial_yatesbury_1000000_p8_ytb_norm.pl"
-DATASET="cidds"
+# DATASET="cidds"
+# attack_files=(
+#   "data/attacks/cidds_intl_bruteForce.csv"
+#   "data/attacks/cidds_intl_dos.csv"
+#   "data/attacks/cidds_intl_portScan.csv"
+#   "data/attacks/cidds_intl_pingScan.csv"
+#   "/mnt/ann/hy/data/cidds_wk3_full.csv"
+#   "/mnt/ann/hy/data/cidds_wk4_full.csv"
+# )
 
+# RULES_PATH="denial_yatesbury_1000000_p4_ytb_norm.pl"
+RULES_PATH="denial_yatesbury_1000000_p4_norm_5tuple.pl"
+DATASET="yatesbury"
 attack_files=(
-  "data/attacks/cidds_intl_bruteForce.csv"
-  "data/attacks/cidds_intl_dos.csv"
-  "data/attacks/cidds_intl_portScan.csv"
-  "data/attacks/cidds_intl_pingScan.csv"
-  "/mnt/ann/hy/data/cidds_wk3_full.csv"
-  "/mnt/ann/hy/data/cidds_wk4_full.csv"
+  "data/Yatesbury/botnet_attack.csv"
+  "data/Yatesbury/dbinjection_attack.csv"
+  "data/Yatesbury/dnsamp_attack.csv"
+  "data/Yatesbury/ddosudp_attack.csv"
+  "data/Yatesbury/synflood_attack.csv"
+  "data/Yatesbury/portscan_attack.csv"
+  "data/Yatesbury/unauthaccess_attack.csv"
 )
+
 
 for attack_file in "${attack_files[@]}"; do
   if [ ! -f "$attack_file" ]; then
@@ -30,6 +42,12 @@ continue
   limit_args=()
   case "$attack_file" in
     */cidds_wk3_full.csv|*/cidds_wk4_full.csv)
+      limit_args=(-limit=100000)
+      ;;
+  esac
+
+  case "$attack_file" in
+    *Yatesbury*)
       limit_args=(-limit=100000)
       ;;
   esac
