@@ -513,6 +513,19 @@ class Theory(object):
             }
             if 'Ip' in varname:
                 value = subnet_labels.get(varval, varval)
+            elif varname == 'FlowDir':
+                flowdir = yatesbury_direction_conversion.inverse.get(varval, None)
+                value = {
+                    'I': 'inbound',
+                    'O': 'outbound',
+                }.get(flowdir, varval)
+            elif varname == 'FlowState':
+                flowstate = yatesbury_flowstate_conversion.inverse.get(varval, None)
+                value = {
+                    'B': 'begin',
+                    'C': 'continuing',
+                    'E': 'end',
+                }.get(flowstate, varval)
             elif 'Flags' in varname:
                 try:
                     value = hex2dotflags(varval)
@@ -592,7 +605,7 @@ class Theory(object):
             return eng
     
         _interpret = None
-        if dataset == 'netflow':
+        if dataset in ['netflow', 'yatesbury']:
             _interpret = _interpret_netflow
         elif dataset == 'pcap':
             _interpret = _interpret_pcap
