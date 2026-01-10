@@ -57,5 +57,6 @@ continue
     -data="$attack_file" \
     -rules="$RULES_PATH" \
     "${limit_args[@]}" \
+    -cores=30 \
     -detect
 done

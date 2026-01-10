@@ -1,4 +1,5 @@
 from bidict import bidict
+import numpy as np
 from scapy.data import IP_PROTOS
 from bidict import bidict
 
@@ -13,24 +14,85 @@ def proto_map(proto: str):
     return PROTOS.inverse[proto]
 
 known_ports = [
-    20,   # FTP Data Transfer
-    21,   # FTP Control
-    22,   # SSH
-    23,   # Telnet
-    25,   # SMTP
-    53,   # DNS
-    67,   # DHCP Server
-    68,   # DHCP Client
-    69,   # TFTP
-    80,   # HTTP
-    110,  # POP3
-    143,  # IMAP
-    443,  # HTTPS
-    514,  # Syslog
-    993,  # IMAPS
-    995,  # POP3S
-    8080 # Alternative HTTP
+    20,    # FTP data
+    21,    # FTP control
+    22,    # SSH
+    23,    # Telnet
+    25,    # SMTP
+    49,    # TACACS/TACACS+
+    53,    # DNS
+    54,    # XNS Clearinghouse (xns-ch); also cited in some trojan-port lists (e.g., MuSka52)
+    67,    # DHCP server
+    68,    # DHCP client
+    69,    # TFTP
+    80,    # HTTP
+    88,    # Kerberos
+    110,   # POP3
+    111,   # rpcbind/portmapper
+    123,   # NTP
+    135,   # MS RPC endpoint mapper
+    137,   # NetBIOS Name Service
+    138,   # NetBIOS Datagram Service
+    139,   # NetBIOS Session Service
+    143,   # IMAP
+    161,   # SNMP
+    162,   # SNMPTRAP
+    179,   # BGP
+    389,   # LDAP
+    443,   # HTTPS
+    445,   # SMB/CIFS (Microsoft-DS)
+    465,   # SMTP submission over TLS (SMTPS)
+    500,   # IKE/ISAKMP (IPsec)
+    514,   # Syslog (commonly UDP)
+    515,   # LPD/LPR printing
+    546,   # DHCPv6 client
+    547,   # DHCPv6 server
+    587,   # SMTP submission
+    636,   # LDAPS
+    853,   # DNS-over-TLS (DoT)
+    873,   # rsync
+    989,   # FTPS data
+    990,   # FTPS control
+    993,   # IMAPS
+    995,   # POP3S
+    1080,  # SOCKS proxy
+    1194,  # OpenVPN (commonly UDP)
+    1433,  # MS SQL Server
+    1521,  # Oracle DB listener
+    1701,  # L2TP
+    1723,  # PPTP
+    1812,  # RADIUS authentication
+    1813,  # RADIUS accounting
+    1883,  # MQTT
+    1900,  # SSDP/UPnP discovery
+    2049,  # NFS
+    3128,  # HTTP proxy (e.g., Squid)
+    3268,  # LDAP Global Catalog
+    3269,  # LDAPS Global Catalog
+    3306,  # MySQL/MariaDB
+    3389,  # RDP
+    5060,  # SIP
+    5061,  # SIP over TLS
+    5353,  # mDNS
+    5432,  # PostgreSQL
+    5672,  # AMQP (RabbitMQ)
+    5900,  # VNC
+    5985,  # WinRM (HTTP)
+    5986,  # WinRM (HTTPS)
+    6379,  # Redis
+    8080,  # Alternate HTTP / proxy
+    8081,  # Alternate HTTP
+    8443,  # Alternate HTTPS
+    9000,  # Common web app/admin (varies by product)
+    9092,  # Kafka
+    9100,  # JetDirect printing
+    9200,  # Elasticsearch/OpenSearch HTTP
+    9300,  # Elasticsearch/OpenSearch transport
+    9418,  # Git
+    11211, # Memcached
+    27017, # MongoDB
 ]
+
 UNKNOWN_PORT = 80_000  # Default value for unknown ports
 WELLKNOWN_PORT = 70_000
 REGISTERED_PORT = 71_000
@@ -158,6 +220,27 @@ def yatesbury_ip_map(ip: str):
     assert ip.startswith('172.0.0.'), "IP address must start with '172.0.0.'"
     return int(ip.split('.')[-1])
 
+def yatesbury_port_map(port: int):
+    assert isinstance(port, int), f"Port must be an integer, got {type(port)}"
+    assert port >= 0 and port <= 65535, f"Port must be in range 0-65535, got {port}"
+    
+    seen_ports = np.load('./data/Yatesbury/seenports.npy')
+    if port in set(cidds_ports) | set(known_ports):
+        return port
+    elif port not in seen_ports:
+        return UNKNOWN_PORT
+    elif port <= 1023:
+        #* Well-known ports
+        return WELLKNOWN_PORT
+    elif 1024 <= port <= 49151:
+        #* Registered ports
+        return REGISTERED_PORT
+    elif port >= 49152:
+        #* Dynamic/private ports
+        return DYNAMIC_PORT
+    else:
+        raise ValueError(f"Invalid port number: {port}")
+
 yatesbury_ips = ['172.0.0.4', '172.0.0.5', '172.0.0.6', '172.0.0.7', '172.0.0.8', '172.0.0.9', '172.0.0.10', '172.0.0.11', '172.0.0.12', '172.0.0.13', '172.0.0.14', '172.0.0.15', '172.0.0.16', '172.0.0.17', '172.0.0.18', '172.0.0.19', '172.0.0.20',]
 #******************** Netflix data Domain Knowledge begins ********************
 netflix_flags = ['SYN', 'ACK-SYN', 'ACK', 'ACK-PSH', 'ACK-FIN']
@@ -205,16 +288,6 @@ def netflix_proto_map(proto: str):
 used_pcap_cols = ['frame_number','frame_time_epoch','frame_len','ip_len', 'ip_version', 'ip_hdr_len','ip_ttl','ip_proto','ip_src','ip_dst',
                   'tcp_srcport','tcp_dstport','tcp_hdr_len','tcp_len','tcp_flags','tcp_seq','tcp_ack','tcp_urgent_pointer',
                   'tcp_window_size_value','tcp_window_size_scalefactor','tcp_window_size','tsval','tsecr', 'protocol']
-popular_ports = [
-    # TCP Ports
-    20, 21, 22, 23, 25, 53, 80, 110, 143, 443,
-    # UDP Ports
-    53, 67, 68, 69, 123, 161,
-    # ICMP Types
-    0, 3, 5, 8, 11,
-    # IGMP Types
-    0x11, 0x16, 0x17, 0x22
-]
 
 #******************** CIDDS-001 Domain Knowledge begins ********************
 #? Should port be a categorical variable? Sometimes we need range values (i.e., application and dynamic ports).

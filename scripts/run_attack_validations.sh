@@ -14,16 +14,16 @@ set -euo pipefail
 #   "/mnt/ann/hy/data/cidds_wk4_full.csv"
 # )
 
-RULES_PATH="denial_yatesbury_1000000_p4_ytb_norm.pl"
+RULES_PATH="denial_yatesbury_1000000_p4_norm.pl"
 DATASET="yatesbury"
 attack_files=(
-  "data/Yatesbury/portscan_attack.csv"
-  "data/Yatesbury/synflood_attack.csv"
-  "data/Yatesbury/botnet_attack.csv"
+#   "data/Yatesbury/portscan_attack.csv"
+#   "data/Yatesbury/synflood_attack.csv"
+#   "data/Yatesbury/botnet_attack.csv"
   "data/Yatesbury/dbinjection_attack.csv"
   "data/Yatesbury/dnsamp_attack.csv"
-  "data/Yatesbury/ddosudp_attack.csv"
-  "data/Yatesbury/unauthaccess_attack.csv"
+#   "data/Yatesbury/ddosudp_attack.csv"
+#   "data/Yatesbury/unauthaccess_attack.csv"
 )
 
 

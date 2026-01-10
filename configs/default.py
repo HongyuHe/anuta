@@ -14,7 +14,7 @@ def get_config():
     default_config.MAX_FIVE_TUPLE_PREDICATES = 0
     default_config.MAX_PAIRWISE_PREDICATES = 0
     #* Maximum number of rules to learn
-    default_config.MAX_RULES = 50_000
+    default_config.MAX_RULES = 100_000
     #* Enable type-based variable suppression
     default_config.ENABLE_TYPE_SUPPRESSION = False
     #* Numeric tolerance for predicate evaluation (0 disables).

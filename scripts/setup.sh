@@ -2,6 +2,14 @@
 set -x
 
 {
+    #* Check if /nfs is mounted; if not, run the client setup.
+    if mountpoint -q /nfs; then
+        echo "/nfs is already mounted."
+    else
+        echo "/nfs is not mounted. Mounting now..."
+        sudo /bin/bash /local/repository/nfs-client.sh
+    fi
+
     sudo apt update -y && sudo apt upgrade -y
 
     # * Update python to 3.10

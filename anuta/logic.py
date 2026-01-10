@@ -460,7 +460,7 @@ class LogicLearner(object):
             log.warning("No evidence sets were produced; returning only prior.")
 
         start = perf_counter()
-        covers, stop_reason = self.enumerate_minimal_hitting_sets(
+        covers, stop_reason, max_size_reached = self.enumerate_minimal_hitting_sets(
             evidence_sets=evidence_sets,
             max_size=max_predicates,
             max_solutions=max_learned_rules,
@@ -490,7 +490,7 @@ class LogicLearner(object):
         for constraint in self.prior:
             learned_rules.add(constraint.expr)
         log.info(f"Total {len(learned_rules)} rules (including prior).")
-        outputf = f"denial_{self.dataset}_{self.num_examples}_p{max_predicates}"
+        outputf = f"denial_{self.dataset}_{self.num_examples}_p{max_size_reached}"
         if FLAGS.label:
             outputf += f"_{FLAGS.label}.pl"
         else:            
@@ -503,7 +503,7 @@ class LogicLearner(object):
         evidence_sets: List[FrozenSet[Constraint]],
         max_size: Optional[int] = None,
         max_solutions: Optional[int] = None,
-    ) -> Tuple[List[Set[Constraint]], str]:
+    ) -> Tuple[List[Set[Constraint]], str, int]:
         """
         Enumerate all minimal hitting sets H such that ∀E in evidence_sets: H ∩ E ≠ ∅.
         
@@ -521,7 +521,7 @@ class LogicLearner(object):
         when increasing the size bound.
         """
         if not evidence_sets:
-            return [], "exhausted"
+            return [], "exhausted", 0
 
         # Build idx_by_pred: Map<Predicate, Set<EvidenceSetIndices>>
         idx_by_pred: Dict[Constraint, Set[int]] = defaultdict(set)
@@ -538,7 +538,7 @@ class LogicLearner(object):
         if empty_esets:
             log.warning(f"Found {len(empty_esets)} empty evidence sets out of {len(evidence_sets)}.")
             log.warning("Problem is unsatisfiable due to one or more empty evidence sets.")
-            return [], "unsatisfiable"
+            return [], "unsatisfiable", 0
 
         # All evidence sets that must be covered (all of them, since empty_esets is 0)
         FULL = set(range(len(evidence_sets)))
@@ -717,6 +717,10 @@ class LogicLearner(object):
 
         META_KEY = "__meta__"
         NEGATED_ID_CONJ_KEY = "negated_identifier_conjunctions"
+        META_HAS_TUPLE_POS = "has_positive_tuple_predicate"
+        META_HAS_TUPLE_NEG = "has_negated_tuple_predicate"
+        META_HAS_ID_NON_TUPLE = "has_identifier_non_tuple_predicate"
+        ID_VTYPES = (VariableType.IP, VariableType.PORT, VariableType.PROTO)
 
         @lru_cache(maxsize=None)
         def _extract_negated_identifier_conjunction(
@@ -756,7 +760,7 @@ class LogicLearner(object):
                 else:
                     return None
 
-                if self.vtypes.get(var) not in (VariableType.IP, VariableType.PORT, VariableType.PROTO):
+                if self.vtypes.get(var) not in ID_VTYPES:
                     return None
                 assignments.append((var, val))
 
@@ -764,6 +768,56 @@ class LogicLearner(object):
             if len(assignments) < 2:
                 return None
             return tuple(sorted(assignments, key=lambda kv: kv[0]))
+
+        @lru_cache(maxsize=None)
+        def _extract_identifier_conjunction(
+            p: Constraint,
+        ) -> Optional[Tuple[Tuple[str, Any], ...]]:
+            """
+            Detect predicates of the form:
+              And(Eq(v1,c1), Eq(v2,c2), ...)
+
+            where all variables are identifier-like (IP/PORT/PROTO).
+            Returns a canonical tuple of (var, value) pairs (sorted by var) if matched.
+            """
+            expr = p.expr
+            if not isinstance(expr, sp.And):
+                return None
+
+            assignments: List[Tuple[str, Any]] = []
+            for arg in expr.args:
+                if not isinstance(arg, sp.Eq):
+                    return None
+                a, b = arg.args
+
+                var: Optional[str] = None
+                val: Any = None
+                if getattr(a, "is_Symbol", False) and not getattr(b, "is_Symbol", False):
+                    var = str(a)
+                    val = b
+                elif getattr(b, "is_Symbol", False) and not getattr(a, "is_Symbol", False):
+                    var = str(b)
+                    val = a
+                else:
+                    return None
+
+                if self.vtypes.get(var) not in ID_VTYPES:
+                    return None
+                assignments.append((var, val))
+
+            # Require at least 2 equalities to avoid catching trivial unary cases.
+            if len(assignments) < 2:
+                return None
+            return tuple(sorted(assignments, key=lambda kv: kv[0]))
+
+        @lru_cache(maxsize=None)
+        def _predicate_identifier_vars(p: Constraint) -> FrozenSet[str]:
+            """Return identifier-like vars (IP/PORT/PROTO) referenced by the predicate."""
+            try:
+                vars_in_pred = {str(s) for s in p.expr.free_symbols}
+            except Exception:
+                return frozenset()
+            return frozenset(v for v in vars_in_pred if self.vtypes.get(v) in ID_VTYPES)
 
         def _conflicts_on_assignment(
             a: Tuple[Tuple[str, Any], ...],
@@ -777,8 +831,23 @@ class LogicLearner(object):
             return False
 
         def _is_tautological_with(chosen_info: Dict[str, Dict[str, Any]], p: Constraint) -> bool:
+            metainfo = chosen_info.get(META_KEY, {})
+            has_tuple_pos = bool(metainfo.get(META_HAS_TUPLE_POS))
+            has_tuple_neg = bool(metainfo.get(META_HAS_TUPLE_NEG))
+            has_id_non_tuple = bool(metainfo.get(META_HAS_ID_NON_TUPLE))
+
             neg_conj = _extract_negated_identifier_conjunction(p)
+            pos_conj = _extract_identifier_conjunction(p)
+            is_tuple_pred = bool(neg_conj or pos_conj)
+            if is_tuple_pred:
+                # Do not mix 5-tuple predicates with any other identifier predicates.
+                if has_id_non_tuple:
+                    return True
+
             if neg_conj:
+                if has_tuple_pos or has_tuple_neg:
+                    # Only allow combinations of positive 5-tuples.
+                    return True
                 # A OR ¬(A ∧ ...) is always True. If any conjunct Eq(var,val) is already chosen,
                 # adding this negated conjunction makes the disjunction tautological.
                 for var, val in neg_conj:
@@ -786,13 +855,21 @@ class LogicLearner(object):
                     if info and val in info.get("eq", ()):
                         return True
 
-                meta = chosen_info.get(META_KEY, {})
-                prior_conjs = meta.get(NEGATED_ID_CONJ_KEY, [])
+                metainfo = chosen_info.get(META_KEY, {})
+                prior_conjs = metainfo.get(NEGATED_ID_CONJ_KEY, [])
                 for prior in prior_conjs:
                     if _conflicts_on_assignment(prior, neg_conj):
                         # ¬A ∨ ¬B is a tautology when A ∧ B is unsatisfiable.
                         return True
                 return False
+
+            if pos_conj:
+                if has_tuple_neg:
+                    return True
+
+            if not is_tuple_pred and (has_tuple_pos or has_tuple_neg):
+                if _predicate_identifier_vars(p):
+                    return True
 
             sig = signature_by_pred.get(p)
             if sig is None:
@@ -800,11 +877,11 @@ class LogicLearner(object):
             if not sig:
                 return False
             var, kind, rhs, inclusive = sig
-            meta = chosen_info.get(META_KEY, {})
+            metainfo = chosen_info.get(META_KEY, {})
 
             if kind == "eq":
                 # Eq(var, c) OR ¬(Eq(var, c) ∧ ...) is always True (absorption).
-                for prior in meta.get(NEGATED_ID_CONJ_KEY, []):
+                for prior in metainfo.get(NEGATED_ID_CONJ_KEY, []):
                     if (var, rhs) in prior:
                         return True
 
@@ -853,28 +930,36 @@ class LogicLearner(object):
 
         def _extend_chosen_info(chosen_info: Dict[str, Dict[str, Any]], p: Constraint) -> Dict[str, Dict[str, Any]]:
             neg_conj = _extract_negated_identifier_conjunction(p)
-            if neg_conj:
-                meta_existing = chosen_info.get(META_KEY)
-                if meta_existing is None:
-                    meta = {NEGATED_ID_CONJ_KEY: [neg_conj]}
-                    if not chosen_info:
-                        return {META_KEY: meta}
-                    new_info = dict(chosen_info)
-                    new_info[META_KEY] = meta
-                    return new_info
+            pos_conj = _extract_identifier_conjunction(p)
+            id_vars = _predicate_identifier_vars(p)
 
-                prior_conjs_existing = meta_existing.get(NEGATED_ID_CONJ_KEY, [])
-                meta = dict(meta_existing)
-                meta[NEGATED_ID_CONJ_KEY] = list(prior_conjs_existing) + [neg_conj]
-                new_info = dict(chosen_info)
-                new_info[META_KEY] = meta
-                return new_info
+            meta_existing = chosen_info.get(META_KEY)
+            meta: Optional[Dict[str, Any]] = None
+            if neg_conj or pos_conj or id_vars:
+                meta = {} if meta_existing is None else dict(meta_existing)
+
+                if neg_conj:
+                    prior_conjs_existing = meta_existing.get(NEGATED_ID_CONJ_KEY, []) if meta_existing else []
+                    meta[NEGATED_ID_CONJ_KEY] = list(prior_conjs_existing) + [neg_conj]
+                    meta[META_HAS_TUPLE_NEG] = True
+
+                if pos_conj:
+                    meta[META_HAS_TUPLE_POS] = True
+
+                if id_vars and not (neg_conj or pos_conj):
+                    meta[META_HAS_ID_NON_TUPLE] = True
 
             sig = signature_by_pred.get(p)
             if sig is None:
                 sig = _extract_signature(p)
             if not sig:
-                return chosen_info
+                if meta is None:
+                    return chosen_info
+                if not chosen_info:
+                    return {META_KEY: meta}
+                new_info = dict(chosen_info)
+                new_info[META_KEY] = meta
+                return new_info
             var, kind, rhs, inclusive = sig
             var_info_existing = chosen_info.get(var)
             # Copy only the touched variable info to reduce per-branch cloning.
@@ -902,6 +987,8 @@ class LogicLearner(object):
                 return {var: var_info}
             new_info = dict(chosen_info)
             new_info[var] = var_info
+            if meta is not None:
+                new_info[META_KEY] = meta
             return new_info
 
         # Size scheduling
@@ -1063,7 +1150,13 @@ class LogicLearner(object):
         for mask in merged_masks:
             pred_set = {pred_list[i] for i in _bits_from_mask(mask)}
             solutions.append(pred_set)
-        return solutions, stop_reason
+
+        if current_max_size is None:
+            max_size_reached = max((len(sol) for sol in solutions), default=0)
+        else:
+            max_size_reached = current_max_size
+
+        return solutions, stop_reason, max_size_reached
 
     def learn_levelwise(
         self,
@@ -1356,7 +1449,7 @@ class LogicLearner(object):
                 chunk_results.append(satisfied)
             return chunk_results
 
-        n_jobs = psutil.cpu_count()
+        n_jobs = psutil.cpu_count() if not FLAGS.cores else FLAGS.cores
 
         # Split into n_jobs chunks (avoid overhead of too many tasks)
         chunks = np.array_split(examples_df, n_jobs)
@@ -1791,85 +1884,85 @@ class LogicLearner(object):
             predicates |= abr_preds
             prior_rules |= abr_priors
 
-        # ---------------------------------------------------------------------
-        # Compound predicate generation
-        # ---------------------------------------------------------------------
-        # Snapshot the base predicate set (pre-compounds) so we only build 2-way
-        # conjunctions from atomic predicates, not from already-compounded ones.
-        base_predicates: List[str] = sorted(predicates)
+        # # ---------------------------------------------------------------------
+        # # Compound predicate generation
+        # # ---------------------------------------------------------------------
+        # # Snapshot the base predicate set (pre-compounds) so we only build 2-way
+        # # conjunctions from atomic predicates, not from already-compounded ones.
+        # base_predicates: List[str] = sorted(predicates)
 
-        def _format_const(val: Any) -> str:
-            if isinstance(val, (np.integer, int)):
-                return str(int(val))
-            if isinstance(val, (np.floating, float)):
-                v = float(val)
-                if math.isfinite(v) and v.is_integer():
-                    return str(int(v))
-                return str(v)
-            return str(val)
+        # def _format_const(val: Any) -> str:
+        #     if isinstance(val, (np.integer, int)):
+        #         return str(int(val))
+        #     if isinstance(val, (np.floating, float)):
+        #         v = float(val)
+        #         if math.isfinite(v) and v.is_integer():
+        #             return str(int(v))
+        #         return str(v)
+        #     return str(val)
 
-        five_tuple_identifier_vars: Set[str] = {
-            var
-            for var in self.vtypes
-            if var in self.examples.columns
-            and self.vtypes[var] in (VariableType.IP, VariableType.PORT, VariableType.PROTO)
-        }
+        # five_tuple_identifier_vars: Set[str] = {
+        #     var
+        #     for var in self.vtypes
+        #     if var in self.examples.columns
+        #     and self.vtypes[var] in (VariableType.IP, VariableType.PORT, VariableType.PROTO)
+        # }
 
-        # (1) Five-tuple conjunction predicates: AND of Eq over (SrcIp, DstIp, SrcPt, DstPt, Proto)
-        # Variable names may vary; use VariableType + name heuristics to identify roles.
-        ip_vars = [v for v in self.variables if self.vtypes.get(v) == VariableType.IP]
-        port_vars = [v for v in self.variables if self.vtypes.get(v) == VariableType.PORT]
-        proto_vars = [v for v in self.variables if self.vtypes.get(v) == VariableType.PROTO]
+        # # (1) Five-tuple conjunction predicates: AND of Eq over (SrcIp, DstIp, SrcPt, DstPt, Proto)
+        # # Variable names may vary; use VariableType + name heuristics to identify roles.
+        # ip_vars = [v for v in self.variables if self.vtypes.get(v) == VariableType.IP]
+        # port_vars = [v for v in self.variables if self.vtypes.get(v) == VariableType.PORT]
+        # proto_vars = [v for v in self.variables if self.vtypes.get(v) == VariableType.PROTO]
 
-        def _pick_by_keywords(candidates: List[str], keywords: Tuple[str, ...]) -> Optional[str]:
-            for kw in keywords:
-                for name in candidates:
-                    if kw in name.lower():
-                        return name
-            return None
+        # def _pick_by_keywords(candidates: List[str], keywords: Tuple[str, ...]) -> Optional[str]:
+        #     for kw in keywords:
+        #         for name in candidates:
+        #             if kw in name.lower():
+        #                 return name
+        #     return None
 
-        src_ip = _pick_by_keywords(ip_vars, ("src", "source", "orig", "client"))
-        dst_ip = _pick_by_keywords(ip_vars, ("dst", "dest", "destination", "resp", "server"))
-        if src_ip is None or dst_ip is None:
-            if len(ip_vars) == 2:
-                src_ip, dst_ip = ip_vars[0], ip_vars[1]
+        # src_ip = _pick_by_keywords(ip_vars, ("src", "source", "orig", "client"))
+        # dst_ip = _pick_by_keywords(ip_vars, ("dst", "dest", "destination", "resp", "server"))
+        # if src_ip is None or dst_ip is None:
+        #     if len(ip_vars) == 2:
+        #         src_ip, dst_ip = ip_vars[0], ip_vars[1]
 
-        src_pt = _pick_by_keywords(port_vars, ("src", "source", "orig", "client"))
-        dst_pt = _pick_by_keywords(port_vars, ("dst", "dest", "destination", "resp", "server"))
-        if src_pt is None or dst_pt is None:
-            if len(port_vars) == 2:
-                src_pt, dst_pt = port_vars[0], port_vars[1]
+        # src_pt = _pick_by_keywords(port_vars, ("src", "source", "orig", "client"))
+        # dst_pt = _pick_by_keywords(port_vars, ("dst", "dest", "destination", "resp", "server"))
+        # if src_pt is None or dst_pt is None:
+        #     if len(port_vars) == 2:
+        #         src_pt, dst_pt = port_vars[0], port_vars[1]
 
-        proto = _pick_by_keywords(proto_vars, ("proto",)) or (proto_vars[0] if proto_vars else None)
+        # proto = _pick_by_keywords(proto_vars, ("proto",)) or (proto_vars[0] if proto_vars else None)
 
-        max_five_tuples = int(getattr(cfg, "MAX_FIVE_TUPLE_PREDICATES", 50_000) or 0)
-        if src_ip and dst_ip and src_pt and dst_pt and proto:
-            tuple_cols = [src_ip, dst_ip, src_pt, dst_pt, proto]
-            if all(c in self.examples.columns for c in tuple_cols):
-                try:
-                    tuple_counts = self.examples[tuple_cols].value_counts(dropna=False)
-                except Exception:
-                    tuple_counts = None
-                if tuple_counts is not None:
-                    if max_five_tuples > 0:
-                        tuple_counts = tuple_counts.head(max_five_tuples)
-                    for values in tuple_counts.index:
-                        if not isinstance(values, tuple):
-                            values = (values,)
-                        parts = [
-                            f"Eq({col},{_format_const(val)})"
-                            for col, val in zip(tuple_cols, values)
-                        ]
-                        # predicates.add(f"And({','.join(parts)})")
-                        predicates.add(f"Not(And({','.join(parts)}))")
-                else:
-                    log.warning("[five-tuple] Failed to enumerate unique 5-tuples; skipping compound 5-tuple predicates.")
-        else:
-            if ip_vars or port_vars or proto_vars:
-                log.warning(
-                    f"[five-tuple] Could not identify full 5-tuple variables "
-                    f"(ip={ip_vars}, port={port_vars}, proto={proto_vars}); skipping 5-tuple conjunction predicates."
-                )
+        # max_five_tuples = int(getattr(cfg, "MAX_FIVE_TUPLE_PREDICATES", 50_000) or 0)
+        # if src_ip and dst_ip and src_pt and dst_pt and proto:
+        #     tuple_cols = [src_ip, dst_ip, src_pt, dst_pt, proto]
+        #     if all(c in self.examples.columns for c in tuple_cols):
+        #         try:
+        #             tuple_counts = self.examples[tuple_cols].value_counts(dropna=False)
+        #         except Exception:
+        #             tuple_counts = None
+        #         if tuple_counts is not None:
+        #             if max_five_tuples > 0:
+        #                 tuple_counts = tuple_counts.head(max_five_tuples)
+        #             for values in tuple_counts.index:
+        #                 if not isinstance(values, tuple):
+        #                     values = (values,)
+        #                 parts = [
+        #                     f"Eq({col},{_format_const(val)})"
+        #                     for col, val in zip(tuple_cols, values)
+        #                 ]
+        #                 predicates.add(f"And({','.join(parts)})")
+        #                 predicates.add(f"Not(And({','.join(parts)}))")
+        #         else:
+        #             log.warning("[five-tuple] Failed to enumerate unique 5-tuples; skipping compound 5-tuple predicates.")
+        # else:
+        #     if ip_vars or port_vars or proto_vars:
+        #         log.warning(
+        #             f"[five-tuple] Could not identify full 5-tuple variables "
+        #             f"(ip={ip_vars}, port={port_vars}, proto={proto_vars}); skipping 5-tuple conjunction predicates."
+        #         )
 
         # # (2) Pairwise conjunction predicates (AND) for non-five-tuple predicates.
         # # Only combine predicates with disjoint variable sets (no shared variables).

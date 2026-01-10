@@ -474,8 +474,8 @@ class Yatesbury(Constructor):
         
         self.df['SrcIp'] = self.df['SrcIp'].apply(yatesbury_ip_map)
         self.df['DstIp'] = self.df['DstIp'].apply(yatesbury_ip_map)
-        self.df['SrcPt'] = self.df['SrcPt'].apply(cidds_port_map)
-        self.df['DstPt'] = self.df['DstPt'].apply(cidds_port_map)
+        self.df['SrcPt'] = self.df['SrcPt'].apply(yatesbury_port_map)
+        self.df['DstPt'] = self.df['DstPt'].apply(yatesbury_port_map)
         self.df['FlowDir'] = self.df['FlowDir'].apply(yatesbury_direction_map)
         self.df['Proto'] = self.df['Proto'].apply(proto_map)
         # self.df['Decision'] = self.df['Decision'].apply(yatesbury_decision_map)
@@ -489,13 +489,15 @@ class Yatesbury(Constructor):
 
         for name in variables:
             if 'ip' in name.lower():
+                ips = set(self.df.SrcIp.unique()) | set(self.df.DstIp.unique())
                 multiconstants.append(
-                    (name, Constants(kind=ConstantType.ASSIGNMENT, values=set(self.df.SrcIp.unique()) | 
-                                                                    set(self.df.DstIp.unique())))
+                    (name, Constants(kind=ConstantType.ASSIGNMENT, values=ips))
                 )
             if 'pt' in name.lower():
+                ports = set(self.df[name].unique()) | {
+                    UNKNOWN_PORT, WELLKNOWN_PORT, REGISTERED_PORT, DYNAMIC_PORT}
                 multiconstants.append(
-                    (name, Constants(kind=ConstantType.ASSIGNMENT, values=cidds_ports))
+                    (name, Constants(kind=ConstantType.ASSIGNMENT, values=ports))
                 )
             if 'pkt' in name.lower():
                 # Percentile-based LIMIT constants.
